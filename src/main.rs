@@ -1,13 +1,16 @@
+use crate::payment_processor::PaymentProcessor;
+
+mod event;
+mod payment_processor;
+
 fn main() {
-    println!("Hello, world!");
-}
+    let mut processor = PaymentProcessor::default();
 
-#[test]
-fn oh_yes() {
-    assert_eq!(2 + 2, 4);
-}
+    processor.on_event(event::Event::Deposit {
+        client_id: 0,
+        tx_id: 0,
+        amount: 10,
+    });
 
-#[test]
-fn oh_no() {
-    assert_eq!(2 + 2, 5);
+    dbg!(processor.account(0));
 }
