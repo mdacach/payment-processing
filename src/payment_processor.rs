@@ -12,3 +12,9 @@ pub(crate) struct Account {
 pub(crate) struct PaymentProcessor {
     accounts: BTreeMap<u16, Account>,
 }
+
+impl PaymentProcessor {
+    pub(crate) fn account(&self, client_id: u16) -> Option<&Account> {
+        self.accounts.get(&client_id)
+    }
+}
