@@ -16,7 +16,7 @@ pub(crate) struct PaymentProcessor {
 }
 
 impl PaymentProcessor {
-    pub(crate) fn on_event(&mut self, event: Event) {
+    pub(crate) fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Deposit {
                 client_id,
@@ -27,7 +27,7 @@ impl PaymentProcessor {
                 client_id,
                 tx_id,
                 amount,
-            } => todo!(),
+            } => self.handle_withdrawal(client_id, tx_id, amount),
             Event::Dispute {
                 client_id,
                 referred_tx_id,
@@ -43,10 +43,24 @@ impl PaymentProcessor {
         }
     }
 
-    fn handle_deposit(&mut self, client_id: u16, tx_id: u32, amount: i64) {
+    fn handle_deposit(&mut self, client_id: u16, tx_id: u32, amount: i64) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
         account.total += amount;
         account.available += amount;
+
+        Ok(())
+    }
+
+    fn handle_withdrawal(&mut self, client_id: u16, tx_id: u32, amount: i64) -> anyhow::Result<()> {
+        let account = self.accounts.entry(client_id).or_default();
+        if account.available < amount {
+            anyhow::bail!("insufficient funds");
+        }
+
+        account.total -= amount;
+        account.available -= amount;
+
+        Ok(())
     }
 }
 
