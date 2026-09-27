@@ -16,8 +16,16 @@ pub(crate) struct Account {
 }
 
 #[derive(Debug, Default)]
+pub(crate) struct DepositInfo {
+    client_id: ClientId,
+    disputed_count: u16,
+    amount: Money,
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct PaymentProcessor {
     accounts: BTreeMap<ClientId, Account>,
+    deposits: BTreeMap<TxId, DepositInfo>,
 }
 
 impl PaymentProcessor {
@@ -36,7 +44,7 @@ impl PaymentProcessor {
             Event::Dispute {
                 client_id,
                 referred_tx_id,
-            } => todo!(),
+            } => self.handle_dispute(client_id, referred_tx_id),
             Event::Resolve {
                 client_id,
                 referred_tx_id,
@@ -74,6 +82,43 @@ impl PaymentProcessor {
 
         account.total -= amount;
         account.available -= amount;
+
+        Ok(())
+    }
+
+    fn handle_dispute(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
+        let account = self.accounts.entry(client_id).or_default();
+
+        match self.deposits.get_mut(&referred_tx_id) {
+            Some(deposit_info) => {
+                if deposit_info.client_id != client_id {
+                    // Very weird, huh!
+                    anyhow::bail!("disputed transaction with wrong client id!");
+                }
+
+                // TODO: reason through what happens with multiple disputes.
+                //       might not make sense because associated funds would be
+                //       held multiple times...
+                // Because multiple disputes are allowed, we increment a counter
+                // instead of simply setting a boolean flag.
+                deposit_info.disputed_count += 1;
+
+                // TODO: double-check whether to allow negative available funds,
+                //       in the case where a disputed deposit has already been
+                //       withdrawn.
+                // A disputed deposit freezes associated funds.
+                account.available -= deposit_info.amount;
+                account.held += deposit_info.amount;
+
+                // This dispute should eventually be resolved either through a
+                // [`Resolve`] or a [`Chargeback`].
+            }
+            None => {
+                // TODO: might be worthwhile to differentiate between
+                //       no-tx-at-all and no-deposit.
+                anyhow::bail!("only deposits can be disputed");
+            }
+        }
 
         Ok(())
     }
