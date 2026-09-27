@@ -59,12 +59,19 @@ impl PaymentProcessor {
     fn handle_deposit(
         &mut self,
         client_id: ClientId,
-        _tx_id: TxId,
+        tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
         account.total += amount;
         account.available += amount;
+
+        let info = DepositInfo {
+            client_id,
+            disputed_count: 0,
+            amount,
+        };
+        self.deposits.insert(tx_id, info);
 
         Ok(())
     }
