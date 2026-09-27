@@ -48,7 +48,7 @@ impl PaymentProcessor {
             Event::Resolve {
                 client_id,
                 referred_tx_id,
-            } => todo!(),
+            } => self.handle_resolve(client_id, referred_tx_id),
             Event::Chargeback {
                 client_id,
                 referred_tx_id,
@@ -119,6 +119,38 @@ impl PaymentProcessor {
 
                 // This dispute should eventually be resolved either through a
                 // [`Resolve`] or a [`Chargeback`].
+            }
+            None => {
+                // TODO: might be worthwhile to differentiate between
+                //       no-tx-at-all and no-deposit.
+                anyhow::bail!("only deposits can be disputed");
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_resolve(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
+        let account = self.accounts.entry(client_id).or_default();
+
+        match self.deposits.get_mut(&referred_tx_id) {
+            Some(deposit_info) => {
+                if deposit_info.client_id != client_id {
+                    // Very weird, huh!
+                    anyhow::bail!("resolve transaction with wrong client id!");
+                }
+
+                if deposit_info.disputed_count == 0 {
+                    anyhow::bail!("resolve non-disputed deposit");
+                }
+
+                // TODO: yeah, probably can't have multiple disputes. will need to change this.
+                deposit_info.disputed_count -= 1;
+
+                // The dispute had previously frozen the associated funds for this deposit,
+                // but now that it has been resolved, the funds are released.
+                account.available += deposit_info.amount;
+                account.held -= deposit_info.amount;
             }
             None => {
                 // TODO: might be worthwhile to differentiate between

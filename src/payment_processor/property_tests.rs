@@ -11,12 +11,13 @@ struct PaymentModel {
     // TODO: might be better to use a Hegel pool here, instead of manually
     //       keeping state.
     disputable_deposits: BTreeSet<(ClientId, TxId)>,
+    currently_disputed_deposits: BTreeSet<(ClientId, TxId)>,
     used_tx_ids: BTreeSet<TxId>,
 }
 
 #[hegel::state_machine]
 impl PaymentModel {
-    #[rule(weight = 7)]
+    #[rule(weight = 10)]
     fn deposit(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
@@ -33,7 +34,7 @@ impl PaymentModel {
         self.disputable_deposits.insert((client_id, tx_id));
     }
 
-    #[rule(weight = 2)]
+    #[rule(weight = 6)]
     fn withdrawal(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
@@ -63,6 +64,24 @@ impl PaymentModel {
             referred_tx_id: tx_id
         });
         let _ = dbg!(self.processor.on_event(dispute));
+
+        self.currently_disputed_deposits.insert((client_id, tx_id));
+    }
+
+    #[rule(weight = 2)]
+    fn resolve(&mut self, _tc: TestCase) {
+        // TODO: also generate resolves that refer a non-deposit or a deposit
+        //       that is not being disputed.
+
+        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit() else {
+            return;
+        };
+
+        let resolve = dbg!(Event::Resolve {
+            client_id,
+            referred_tx_id: tx_id
+        });
+        let _ = dbg!(self.processor.on_event(resolve));
     }
 
     // TODO: need to review all of these invariants. which is good, because they
@@ -113,6 +132,18 @@ impl PaymentModel {
 
     fn pop_disputable_deposit(&mut self) -> Option<(ClientId, TxId)> {
         let deposits = &mut self.disputable_deposits;
+        if deposits.is_empty() {
+            return None;
+        }
+
+        let index = rand::random_range(0..deposits.len());
+        let key = *deposits.iter().nth(index)?;
+
+        deposits.take(&key)
+    }
+
+    fn pop_currently_disputed_deposit(&mut self) -> Option<(ClientId, TxId)> {
+        let deposits = &mut self.currently_disputed_deposits;
         if deposits.is_empty() {
             return None;
         }
