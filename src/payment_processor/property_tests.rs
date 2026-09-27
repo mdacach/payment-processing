@@ -8,6 +8,8 @@ use hegel::{generators as gs, TestCase};
 #[derive(Debug, Default)]
 struct PaymentModel {
     processor: PaymentProcessor,
+    // TODO: might be better to use a Hegel pool here, instead of manually
+    //       keeping state.
     eligible_deposits: BTreeSet<(ClientId, TxId)>,
     used_tx_ids: BTreeSet<TxId>,
 }
@@ -26,6 +28,9 @@ impl PaymentModel {
             amount,
         });
         let _ = self.processor.on_event(deposit);
+
+        // Mark this deposit as eligible to be disputed later.
+        self.eligible_deposits.insert((client_id, tx_id));
     }
 
     #[rule(weight = 2)]
@@ -40,6 +45,24 @@ impl PaymentModel {
             amount,
         });
         let _ = dbg!(self.processor.on_event(withdrawal));
+    }
+
+    #[rule(weight = 3)]
+    fn dispute(&mut self, _tc: TestCase) {
+        // TODO: also generate disputes that refer a non-deposit or a deposit
+        //       that is already being disputed.
+
+        // A dispute for a non-eligible transaction is still interesting input,
+        // but for now let's simply avoid those.
+        let Some((client_id, tx_id)) = self.pop_eligible_deposit() else {
+            return;
+        };
+
+        let dispute = dbg!(Event::Dispute {
+            client_id,
+            referred_tx_id: tx_id
+        });
+        let _ = dbg!(self.processor.on_event(dispute));
     }
 
     // TODO: need to review all of these invariants. which is good, because they
@@ -86,6 +109,18 @@ impl PaymentModel {
 
     fn draw_client_id(&mut self, tc: &TestCase) -> ClientId {
         tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
+    }
+
+    fn pop_eligible_deposit(&mut self) -> Option<(ClientId, TxId)> {
+        let deposits = &mut self.eligible_deposits;
+        if deposits.is_empty() {
+            return None;
+        }
+
+        let index = rand::random_range(0..deposits.len());
+        let key = *deposits.iter().nth(index)?;
+
+        deposits.take(&key)
     }
 }
 

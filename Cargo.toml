@@ -8,3 +8,4 @@ anyhow = "1"
 
 [dev-dependencies]
 hegeltest = "0.47.4"
+rand = "0.10.3"
