@@ -1,20 +1,23 @@
 use std::collections::BTreeMap;
 
-use crate::event::Event;
+use crate::{
+    event::Event,
+    types::{ClientId, Money, TxId},
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct Account {
     // TODO: decide whether to allow negative totals. a possible scenario that would
     //       create a negative total is a deposit that is withdrawn and then disputed.
-    total: i64,
-    available: i64,
-    held: i64,
+    total: Money,
+    available: Money,
+    held: Money,
     is_locked: bool,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct PaymentProcessor {
-    accounts: BTreeMap<u16, Account>,
+    accounts: BTreeMap<ClientId, Account>,
 }
 
 impl PaymentProcessor {
@@ -45,7 +48,12 @@ impl PaymentProcessor {
         }
     }
 
-    fn handle_deposit(&mut self, client_id: u16, tx_id: u32, amount: i64) -> anyhow::Result<()> {
+    fn handle_deposit(
+        &mut self,
+        client_id: ClientId,
+        _tx_id: TxId,
+        amount: Money,
+    ) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
         account.total += amount;
         account.available += amount;
@@ -53,7 +61,12 @@ impl PaymentProcessor {
         Ok(())
     }
 
-    fn handle_withdrawal(&mut self, client_id: u16, tx_id: u32, amount: i64) -> anyhow::Result<()> {
+    fn handle_withdrawal(
+        &mut self,
+        client_id: ClientId,
+        _tx_id: TxId,
+        amount: Money,
+    ) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
         if account.available < amount {
             anyhow::bail!("insufficient funds");

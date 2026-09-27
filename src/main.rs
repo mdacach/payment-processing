@@ -2,6 +2,7 @@ use crate::payment_processor::PaymentProcessor;
 
 mod event;
 mod payment_processor;
+mod types;
 
 fn main() {
     let mut processor = PaymentProcessor::default();
