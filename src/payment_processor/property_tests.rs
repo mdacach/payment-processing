@@ -10,7 +10,7 @@ struct PaymentModel {
     processor: PaymentProcessor,
     // TODO: might be better to use a Hegel pool here, instead of manually
     //       keeping state.
-    eligible_deposits: BTreeSet<(ClientId, TxId)>,
+    disputable_deposits: BTreeSet<(ClientId, TxId)>,
     used_tx_ids: BTreeSet<TxId>,
 }
 
@@ -30,7 +30,7 @@ impl PaymentModel {
         let _ = self.processor.on_event(deposit);
 
         // Mark this deposit as eligible to be disputed later.
-        self.eligible_deposits.insert((client_id, tx_id));
+        self.disputable_deposits.insert((client_id, tx_id));
     }
 
     #[rule(weight = 2)]
@@ -54,7 +54,7 @@ impl PaymentModel {
 
         // A dispute for a non-eligible transaction is still interesting input,
         // but for now let's simply avoid those.
-        let Some((client_id, tx_id)) = self.pop_eligible_deposit() else {
+        let Some((client_id, tx_id)) = self.pop_disputable_deposit() else {
             return;
         };
 
@@ -111,8 +111,8 @@ impl PaymentModel {
         tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
     }
 
-    fn pop_eligible_deposit(&mut self) -> Option<(ClientId, TxId)> {
-        let deposits = &mut self.eligible_deposits;
+    fn pop_disputable_deposit(&mut self) -> Option<(ClientId, TxId)> {
+        let deposits = &mut self.disputable_deposits;
         if deposits.is_empty() {
             return None;
         }
