@@ -84,6 +84,22 @@ impl PaymentModel {
         let _ = dbg!(self.processor.on_event(resolve));
     }
 
+    #[rule(weight = 2)]
+    fn chargeback(&mut self, tc: TestCase) {
+        // TODO: also generate chargebacks that refer a non-deposit or a deposit
+        //       that is not being disputed.
+
+        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit(&tc) else {
+            return;
+        };
+
+        let chargeback = dbg!(Event::Chargeback {
+            client_id,
+            referred_tx_id: tx_id
+        });
+        let _ = dbg!(self.processor.on_event(chargeback));
+    }
+
     // TODO: need to review all of these invariants. which is good, because they
     //       will fail soon.
     #[invariant(always_run)]

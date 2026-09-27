@@ -52,7 +52,7 @@ impl PaymentProcessor {
             Event::Chargeback {
                 client_id,
                 referred_tx_id,
-            } => todo!(),
+            } => self.handle_chargeback(client_id, referred_tx_id),
         }
     }
 
@@ -151,6 +151,44 @@ impl PaymentProcessor {
                 // but now that it has been resolved, the funds are released.
                 account.available += deposit_info.amount;
                 account.held -= deposit_info.amount;
+            }
+            None => {
+                // TODO: might be worthwhile to differentiate between
+                //       no-tx-at-all and no-deposit.
+                anyhow::bail!("only deposits can be disputed");
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_chargeback(
+        &mut self,
+        client_id: ClientId,
+        referred_tx_id: TxId,
+    ) -> anyhow::Result<()> {
+        let account = self.accounts.entry(client_id).or_default();
+
+        match self.deposits.get_mut(&referred_tx_id) {
+            Some(deposit_info) => {
+                if deposit_info.client_id != client_id {
+                    // Very weird, huh!
+                    anyhow::bail!("chargeback transaction with wrong client id!");
+                }
+
+                if deposit_info.disputed_count == 0 {
+                    anyhow::bail!("chargeback non-disputed deposit");
+                }
+
+                // TODO: yeah, probably can't have multiple disputes. will need to change this.
+                deposit_info.disputed_count -= 1;
+
+                // In the case of a chargeback, the frozen funds have been withdrawn.
+                account.held -= deposit_info.amount;
+                account.total -= deposit_info.amount;
+
+                // As part of fraud detection, a chargeback causes a client's account to be locked.
+                account.is_locked = true;
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
