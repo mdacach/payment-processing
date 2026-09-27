@@ -5,7 +5,7 @@ use crate::{
     types::{ClientId, Money, TxId},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Account {
     // TODO: decide whether to allow negative totals. a possible scenario that would
     //       create a negative total is a deposit that is withdrawn and then disputed.
@@ -15,14 +15,16 @@ pub(crate) struct Account {
     is_locked: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct DepositInfo {
     client_id: ClientId,
     disputed_count: u16,
     amount: Money,
 }
 
-#[derive(Debug, Default)]
+// TODO: not sure how I feel about this being Clone, but anyway it's
+//       not too bad here.
+#[derive(Debug, Clone, Default)]
 pub(crate) struct PaymentProcessor {
     accounts: BTreeMap<ClientId, Account>,
     deposits: BTreeMap<TxId, DepositInfo>,

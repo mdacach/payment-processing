@@ -13,6 +13,25 @@ struct PaymentModel {
     disputable_deposits: BTreeSet<(ClientId, TxId)>,
     currently_disputed_deposits: BTreeSet<(ClientId, TxId)>,
     used_tx_ids: BTreeSet<TxId>,
+
+    previous_state: Option<ModelSnapshot>,
+}
+
+#[derive(Debug, Default)]
+struct ModelSnapshot {
+    processor: PaymentProcessor,
+    disputable_deposits: BTreeSet<(ClientId, TxId)>,
+    currently_disputed_deposits: BTreeSet<(ClientId, TxId)>,
+}
+
+impl From<&PaymentModel> for ModelSnapshot {
+    fn from(value: &PaymentModel) -> Self {
+        Self {
+            processor: value.processor.clone(),
+            disputable_deposits: value.disputable_deposits.clone(),
+            currently_disputed_deposits: value.currently_disputed_deposits.clone(),
+        }
+    }
 }
 
 #[hegel::state_machine]
@@ -128,6 +147,35 @@ impl PaymentModel {
         for account in self.processor.accounts.values() {
             assert_eq!(account.total, account.available + account.held);
         }
+    }
+
+    #[invariant(always_run)]
+    fn locked_accounts_are_not_mutable(&self, _: TestCase) {
+        let Some(previous) = &self.previous_state else {
+            return;
+        };
+
+        let current_accounts = &self.processor.accounts;
+
+        for (id, previous_account) in &previous.processor.accounts {
+            if previous_account.is_locked {
+                let current_account = current_accounts
+                    .get(&id)
+                    .unwrap_or_else(|| panic!("previously locked account {id} is missing!"));
+
+                // TODO: could use an Eq implementation here, but a bit weird, maybe.
+                assert_eq!(previous_account.available, current_account.available);
+                assert_eq!(previous_account.held, current_account.held);
+                assert_eq!(previous_account.total, current_account.total);
+                assert_eq!(previous_account.is_locked, current_account.is_locked);
+            }
+        }
+    }
+
+    // TODO: kind of a hacky way of doing this, but maybe works.
+    #[invariant(always_run)]
+    fn save_snapshot(&mut self, _: TestCase) {
+        self.previous_state = Some(ModelSnapshot::from(&*self));
     }
 
     fn draw_unused_tx_id(&mut self, tc: &TestCase) -> TxId {
