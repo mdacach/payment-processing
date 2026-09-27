@@ -49,13 +49,13 @@ impl PaymentModel {
     }
 
     #[rule(weight = 3)]
-    fn dispute(&mut self, _tc: TestCase) {
+    fn dispute(&mut self, tc: TestCase) {
         // TODO: also generate disputes that refer a non-deposit or a deposit
         //       that is already being disputed.
 
         // A dispute for a non-eligible transaction is still interesting input,
         // but for now let's simply avoid those.
-        let Some((client_id, tx_id)) = self.pop_disputable_deposit() else {
+        let Some((client_id, tx_id)) = self.pop_disputable_deposit(&tc) else {
             return;
         };
 
@@ -69,11 +69,11 @@ impl PaymentModel {
     }
 
     #[rule(weight = 2)]
-    fn resolve(&mut self, _tc: TestCase) {
+    fn resolve(&mut self, tc: TestCase) {
         // TODO: also generate resolves that refer a non-deposit or a deposit
         //       that is not being disputed.
 
-        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit() else {
+        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit(&tc) else {
             return;
         };
 
@@ -130,25 +130,25 @@ impl PaymentModel {
         tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
     }
 
-    fn pop_disputable_deposit(&mut self) -> Option<(ClientId, TxId)> {
+    fn pop_disputable_deposit(&mut self, tc: &TestCase) -> Option<(ClientId, TxId)> {
         let deposits = &mut self.disputable_deposits;
         if deposits.is_empty() {
             return None;
         }
 
-        let index = rand::random_range(0..deposits.len());
+        let index = tc.draw(gs::integers::<usize>().max_value(deposits.len() - 1));
         let key = *deposits.iter().nth(index)?;
 
         deposits.take(&key)
     }
 
-    fn pop_currently_disputed_deposit(&mut self) -> Option<(ClientId, TxId)> {
+    fn pop_currently_disputed_deposit(&mut self, tc: &TestCase) -> Option<(ClientId, TxId)> {
         let deposits = &mut self.currently_disputed_deposits;
         if deposits.is_empty() {
             return None;
         }
 
-        let index = rand::random_range(0..deposits.len());
+        let index = tc.draw(gs::integers::<usize>().max_value(deposits.len() - 1));
         let key = *deposits.iter().nth(index)?;
 
         deposits.take(&key)
