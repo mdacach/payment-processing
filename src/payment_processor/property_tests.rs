@@ -183,11 +183,17 @@ impl PaymentModel {
         // This is a naive way of drawing an available transaction id,
         // but it shall suffice for now.
         loop {
-            let candidate = tc.draw(gs::integers::<TxId>());
+            let candidate_tx_id = tc.draw(gs::integers::<TxId>());
 
-            if !self.used_tx_ids.contains(&candidate) {
-                break candidate;
+            if self.used_tx_ids.contains(&candidate_tx_id) {
+                tc.note(&format!(
+                    "transaction ID {candidate_tx_id} is already used; retrying"
+                ));
+                continue;
             }
+
+            tc.note(&format!("selected transaction ID {candidate_tx_id}"));
+            return candidate_tx_id;
         }
     }
 
