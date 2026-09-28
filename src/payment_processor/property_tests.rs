@@ -158,7 +158,14 @@ impl PaymentModel {
         }
     }
 
-    // TODO: kind of a hacky way of doing this, but maybe works.
+    // Transition checks require knowledge of the previous state (to compare
+    // with the current one). This is a hacky way of persisting that state:
+    // because an always_run invariant runs after every step, and because it
+    // allows for mutable state, we can make it save the state for the future.
+    // But this isn't ideal — if we removed the always_run annotation, this
+    // invariant would only run after _some_ steps, and the state tracking would
+    // be inconsistent.
+    // TODO: investigate a better way of doing this.
     #[invariant(always_run)]
     fn save_snapshot(&mut self, _: TestCase) {
         self.previous_state = Some(ModelSnapshot::from(&*self));
