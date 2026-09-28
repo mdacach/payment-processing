@@ -11,7 +11,7 @@ fn main() {
         .on_event(event::Event::Deposit {
             client_id: 0,
             tx_id: 0,
-            amount: 10,
+            amount: types::Money::try_from(10).expect("10 is representable"),
         })
         .expect("works!");
 
@@ -19,7 +19,7 @@ fn main() {
         .on_event(event::Event::Withdrawal {
             client_id: 0,
             tx_id: 0,
-            amount: 8,
+            amount: types::Money::try_from(8).expect("8 is representable"),
         })
         .expect("works!");
 

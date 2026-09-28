@@ -1,7 +1,5 @@
 use crate::types::{ClientId, Money, TxId};
 
-// TODO: create newtype for money unit, in order to allow four points after the
-// decimal of precision.
 // TODO: consider creating newtypes for values used here.
 // TODO: add documentation.
 #[derive(Debug, Clone, Copy)]

@@ -32,7 +32,12 @@ impl PaymentModel {
     fn deposit(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
-        let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(1_000_000));
+        // Considering the fixed-point underlying type, this range represents
+        // 0.0001 (the smallest allowed value) to 1_000_000.0000 (a very big
+        // deposit!).
+        let amount = Money::from_mantissa(
+            tc.draw(gs::integers::<i64>().min_value(1).max_value(10_000_000_000)),
+        );
 
         tc.note(&format!("deposit for client {client_id}, amount {amount}"));
         let deposit = Event::Deposit {
@@ -56,7 +61,12 @@ impl PaymentModel {
     fn withdrawal(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
-        let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(500_000));
+        // Considering the fixed-point underlying type, this range represents
+        // 0.0001 (the smallest allowed value) to 500_000.0000 (a very big
+        // withdrawal!).
+        let amount = Money::from_mantissa(
+            tc.draw(gs::integers::<i64>().min_value(1).max_value(5_000_000_000)),
+        );
 
         tc.note(&format!(
             "withdrawal for client {client_id}, amount {amount}"
@@ -305,7 +315,7 @@ impl PaymentModel {
     }
 }
 
-#[hegel::test(report_multiple_failures = true, test_cases = 500)]
+#[hegel::test(report_multiple_failures = true, test_cases = 5000, suppress_health_check = [hegel::HealthCheck::TooSlow])]
 fn state_machine_run(tc: TestCase) {
     let processor = PaymentProcessor::default();
     let model = PaymentModel {
@@ -315,5 +325,5 @@ fn state_machine_run(tc: TestCase) {
         used_tx_ids: Default::default(),
         previous_state: Default::default(),
     };
-    hegel::stateful::machine(model).run(tc)
+    hegel::stateful::machine(model).steps(1000).run(tc)
 }
