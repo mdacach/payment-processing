@@ -1,3 +1,8 @@
 No account CSV output was produced.
+Exit status: 1
 
-(rejected input)
+Standard error:
+Error: samples/readable/13-malformed-column-count.csv: record 3
+
+Caused by:
+    CSV error: record 2 (line: 3, byte: 41): found record with 3 fields, but the previous record has 4 fields
