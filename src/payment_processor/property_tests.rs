@@ -34,12 +34,19 @@ impl PaymentModel {
         let client_id = self.draw_client_id(&tc);
         let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(1_000_000));
 
-        let deposit = dbg!(Event::Deposit {
+        tc.note(&format!("deposit for client {client_id}, amount {amount}"));
+        let deposit = Event::Deposit {
             client_id,
             tx_id,
             amount,
-        });
-        let _ = self.processor.on_event(deposit);
+        };
+        let result = self.processor.on_event(deposit);
+        tc.note(&format!("result: {result:?}"));
+
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
 
         // Mark this deposit as eligible to be disputed later.
         self.disputable_deposits.add((client_id, tx_id));
@@ -51,12 +58,21 @@ impl PaymentModel {
         let client_id = self.draw_client_id(&tc);
         let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(500_000));
 
-        let withdrawal = dbg!(Event::Withdrawal {
+        tc.note(&format!(
+            "withdrawal for client {client_id}, amount {amount}"
+        ));
+        let withdrawal = Event::Withdrawal {
             client_id,
             tx_id,
             amount,
-        });
-        let _ = dbg!(self.processor.on_event(withdrawal));
+        };
+        let result = self.processor.on_event(withdrawal);
+        tc.note(&format!("result: {result:?}"));
+
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
     }
 
     #[rule(weight = 3)]
@@ -71,13 +87,23 @@ impl PaymentModel {
         let disputed_deposit = tc.draw(self.disputable_deposits.values_consumed());
         let (client_id, tx_id) = disputed_deposit;
 
-        let dispute = dbg!(Event::Dispute {
+        tc.note(&format!(
+            "dispute for client {client_id}, deposit_id {tx_id}"
+        ));
+
+        let dispute = Event::Dispute {
             client_id,
-            referred_tx_id: tx_id
-        });
-        let _ = dbg!(self.processor.on_event(dispute));
+            referred_tx_id: tx_id,
+        };
+        let result = self.processor.on_event(dispute);
+        tc.note(&format!("result: {result:?}"));
 
         self.currently_disputed_deposits.add((client_id, tx_id));
+
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
     }
 
     #[rule(weight = 2)]
@@ -89,11 +115,21 @@ impl PaymentModel {
         let resolved_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
         let (client_id, tx_id) = resolved_deposit;
 
-        let resolve = dbg!(Event::Resolve {
+        tc.note(&format!(
+            "resolve for client {client_id}, deposit_id {tx_id}"
+        ));
+
+        let resolve = Event::Resolve {
             client_id,
-            referred_tx_id: tx_id
-        });
-        let _ = dbg!(self.processor.on_event(resolve));
+            referred_tx_id: tx_id,
+        };
+        let result = self.processor.on_event(resolve);
+        tc.note(&format!("result: {result:?}"));
+
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
     }
 
     #[rule(weight = 2)]
@@ -105,11 +141,22 @@ impl PaymentModel {
         let chargedback_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
         let (client_id, tx_id) = chargedback_deposit;
 
-        let chargeback = dbg!(Event::Chargeback {
+        tc.note(&format!(
+            "chargeback for client {client_id}, deposit_id {tx_id}"
+        ));
+
+        let chargeback = Event::Chargeback {
             client_id,
-            referred_tx_id: tx_id
-        });
-        let _ = dbg!(self.processor.on_event(chargeback));
+            referred_tx_id: tx_id,
+        };
+        let result = self.processor.on_event(chargeback);
+        tc.note(&format!("result: {result:?}"));
+
+        // TODO: there should be a more ergonomic way of printing something after every rule.
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
     }
 
     // TODO: need to review all of these invariants. which is good, because they
