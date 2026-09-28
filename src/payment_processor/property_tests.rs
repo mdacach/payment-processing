@@ -186,7 +186,10 @@ impl PaymentModel {
 
     #[hegel::test_helper]
     fn draw_client_id(&mut self, tc: &TestCase) -> ClientId {
-        tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
+        tc.draw_named(
+            "client_id",
+            gs::integers::<ClientId>().min_value(0).max_value(10),
+        )
     }
 }
 
