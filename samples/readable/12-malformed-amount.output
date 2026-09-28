@@ -1,0 +1,8 @@
+No account CSV output was produced.
+Exit status: 1
+
+Standard error:
+Error: samples/readable/12-malformed-amount.csv: record 3
+
+Caused by:
+    invalid amount: 1.2oops

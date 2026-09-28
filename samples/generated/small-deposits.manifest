@@ -1,0 +1,17 @@
+format_version=1
+hegeltest_version=0.47.4
+profile=small-deposits
+seed=1
+steps=24
+client_range=1..=1
+deposit_mantissa_range=1..=10000000000
+withdrawal_mantissa_range=1..=5000000000
+rule_weights=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+required_row_range=10..=30
+required_client_range=1..=1
+minimum_event_counts=[10, 0, 0, 0, 0]
+require_rejection=false
+rows=24
+clients=1
+event_counts=[24, 0, 0, 0, 0]
+rejected=0
