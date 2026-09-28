@@ -265,6 +265,7 @@ impl PaymentModel {
             }
 
             tc.note(&format!("selected transaction ID {candidate_tx_id}"));
+            self.used_tx_ids.insert(candidate_tx_id);
             return candidate_tx_id;
         }
     }
