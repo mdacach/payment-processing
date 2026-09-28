@@ -76,7 +76,7 @@ impl PaymentModel {
     }
 
     #[rule(weight = 3)]
-    fn dispute(&mut self, tc: TestCase) {
+    fn dispute_eligible_deposit(&mut self, tc: TestCase) {
         // TODO: also generate disputes that refer a non-deposit or a deposit
         //       that is already being disputed.
 
@@ -100,6 +100,32 @@ impl PaymentModel {
 
         self.currently_disputed_deposits.add((client_id, tx_id));
 
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
+    }
+
+    // TODO: would be nice to add documentation.
+    #[rule(weight = 1)]
+    fn dispute_random(&mut self, tc: TestCase) {
+        tc.event("dispute random");
+        let client_id = self.draw_client_id(&tc);
+        let random_tx_id = tc.draw(gs::integers::<TxId>());
+
+        tc.note(&format!(
+            "dispute for client {client_id}, random_tx_id {random_tx_id}; tx_id probably doesn't exist"
+        ));
+
+        let dispute = Event::Dispute {
+            client_id,
+            referred_tx_id: random_tx_id,
+        };
+        let result = self.processor.on_event(dispute);
+        tc.note(&format!("result: {result:?}"));
+
+        // TODO: maybe simply let dispute generate random numbers anyway?
+        //       unclear whether trying to control the weights is helpful.
         tc.note(&format!(
             "updated account: {:?}",
             self.processor.account(client_id)
