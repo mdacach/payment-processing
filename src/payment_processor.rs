@@ -236,6 +236,12 @@ impl PaymentProcessor {
         self.accounts.get(&client_id)
     }
 
+    pub fn accounts(&self) -> impl Iterator<Item = (ClientId, &Account)> {
+        self.accounts
+            .iter()
+            .map(|(&client_id, account)| (client_id, account))
+    }
+
     // TODO: investigate how to make this more secure. there are some patterns that could be in handy,
     //       like witness: https://arxiv.org/pdf/2307.07069
     fn maybe_prevent_locked_account(&self, event: Event) -> anyhow::Result<()> {
