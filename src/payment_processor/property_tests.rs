@@ -5,31 +5,23 @@ use hegel::{generators as gs, TestCase};
 
 // TODO: think about an oracle to test against.
 // TODO: come up with more invariants.
-#[derive(Debug, Default)]
 struct PaymentModel {
     processor: PaymentProcessor,
-    // TODO: might be better to use a Hegel pool here, instead of manually
-    //       keeping state.
-    disputable_deposits: BTreeSet<(ClientId, TxId)>,
-    currently_disputed_deposits: BTreeSet<(ClientId, TxId)>,
+    disputable_deposits: hegel::stateful::Pool<(ClientId, TxId)>,
+    currently_disputed_deposits: hegel::stateful::Pool<(ClientId, TxId)>,
     used_tx_ids: BTreeSet<TxId>,
 
     previous_state: Option<ModelSnapshot>,
 }
 
-#[derive(Debug, Default)]
 struct ModelSnapshot {
     processor: PaymentProcessor,
-    disputable_deposits: BTreeSet<(ClientId, TxId)>,
-    currently_disputed_deposits: BTreeSet<(ClientId, TxId)>,
 }
 
 impl From<&PaymentModel> for ModelSnapshot {
     fn from(value: &PaymentModel) -> Self {
         Self {
             processor: value.processor.clone(),
-            disputable_deposits: value.disputable_deposits.clone(),
-            currently_disputed_deposits: value.currently_disputed_deposits.clone(),
         }
     }
 }
@@ -50,7 +42,7 @@ impl PaymentModel {
         let _ = self.processor.on_event(deposit);
 
         // Mark this deposit as eligible to be disputed later.
-        self.disputable_deposits.insert((client_id, tx_id));
+        self.disputable_deposits.add((client_id, tx_id));
     }
 
     #[rule(weight = 6)]
@@ -72,11 +64,9 @@ impl PaymentModel {
         // TODO: also generate disputes that refer a non-deposit or a deposit
         //       that is already being disputed.
 
-        // A dispute for a non-eligible transaction is still interesting input,
+        // A dispute for a non-disputable transaction is still interesting input,
         // but for now let's simply avoid those.
-        let Some((client_id, tx_id)) = self.pop_disputable_deposit(&tc) else {
-            return;
-        };
+        let (client_id, tx_id) = tc.draw(self.disputable_deposits.values_consumed());
 
         let dispute = dbg!(Event::Dispute {
             client_id,
@@ -84,7 +74,7 @@ impl PaymentModel {
         });
         let _ = dbg!(self.processor.on_event(dispute));
 
-        self.currently_disputed_deposits.insert((client_id, tx_id));
+        self.currently_disputed_deposits.add((client_id, tx_id));
     }
 
     #[rule(weight = 2)]
@@ -92,9 +82,7 @@ impl PaymentModel {
         // TODO: also generate resolves that refer a non-deposit or a deposit
         //       that is not being disputed.
 
-        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit(&tc) else {
-            return;
-        };
+        let (client_id, tx_id) = tc.draw(self.currently_disputed_deposits.values_consumed());
 
         let resolve = dbg!(Event::Resolve {
             client_id,
@@ -108,9 +96,7 @@ impl PaymentModel {
         // TODO: also generate chargebacks that refer a non-deposit or a deposit
         //       that is not being disputed.
 
-        let Some((client_id, tx_id)) = self.pop_currently_disputed_deposit(&tc) else {
-            return;
-        };
+        let (client_id, tx_id) = tc.draw(self.currently_disputed_deposits.values_consumed());
 
         let chargeback = dbg!(Event::Chargeback {
             client_id,
@@ -193,30 +179,6 @@ impl PaymentModel {
     fn draw_client_id(&mut self, tc: &TestCase) -> ClientId {
         tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
     }
-
-    fn pop_disputable_deposit(&mut self, tc: &TestCase) -> Option<(ClientId, TxId)> {
-        let deposits = &mut self.disputable_deposits;
-        if deposits.is_empty() {
-            return None;
-        }
-
-        let index = tc.draw(gs::integers::<usize>().max_value(deposits.len() - 1));
-        let key = *deposits.iter().nth(index)?;
-
-        deposits.take(&key)
-    }
-
-    fn pop_currently_disputed_deposit(&mut self, tc: &TestCase) -> Option<(ClientId, TxId)> {
-        let deposits = &mut self.currently_disputed_deposits;
-        if deposits.is_empty() {
-            return None;
-        }
-
-        let index = tc.draw(gs::integers::<usize>().max_value(deposits.len() - 1));
-        let key = *deposits.iter().nth(index)?;
-
-        deposits.take(&key)
-    }
 }
 
 #[hegel::test]
@@ -224,7 +186,10 @@ fn state_machine_run(tc: TestCase) {
     let processor = PaymentProcessor::default();
     let model = PaymentModel {
         processor,
-        ..Default::default()
+        disputable_deposits: hegel::stateful::pool(&tc),
+        currently_disputed_deposits: hegel::stateful::pool(&tc),
+        used_tx_ids: Default::default(),
+        previous_state: Default::default(),
     };
     hegel::stateful::machine(model).run(tc)
 }
