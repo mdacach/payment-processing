@@ -66,7 +66,10 @@ impl PaymentModel {
 
         // A dispute for a non-disputable transaction is still interesting input,
         // but for now let's simply avoid those.
-        let (client_id, tx_id) = tc.draw(self.disputable_deposits.values_consumed());
+
+        // Destructuring it immediately makes Hegel not annotate the draw by its name.
+        let disputed_deposit = tc.draw(self.disputable_deposits.values_consumed());
+        let (client_id, tx_id) = disputed_deposit;
 
         let dispute = dbg!(Event::Dispute {
             client_id,
@@ -82,7 +85,9 @@ impl PaymentModel {
         // TODO: also generate resolves that refer a non-deposit or a deposit
         //       that is not being disputed.
 
-        let (client_id, tx_id) = tc.draw(self.currently_disputed_deposits.values_consumed());
+        // Destructuring it immediately makes Hegel not annotate the draw by its name.
+        let resolved_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
+        let (client_id, tx_id) = resolved_deposit;
 
         let resolve = dbg!(Event::Resolve {
             client_id,
@@ -96,7 +101,9 @@ impl PaymentModel {
         // TODO: also generate chargebacks that refer a non-deposit or a deposit
         //       that is not being disputed.
 
-        let (client_id, tx_id) = tc.draw(self.currently_disputed_deposits.values_consumed());
+        // Destructuring it immediately makes Hegel not annotate the draw by its name.
+        let chargedback_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
+        let (client_id, tx_id) = chargedback_deposit;
 
         let chargeback = dbg!(Event::Chargeback {
             client_id,
