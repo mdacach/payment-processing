@@ -258,7 +258,7 @@ impl PaymentModel {
     }
 }
 
-#[hegel::test]
+#[hegel::test(report_multiple_failures = true, test_cases = 500)]
 fn state_machine_run(tc: TestCase) {
     let processor = PaymentProcessor::default();
     let model = PaymentModel {
