@@ -219,3 +219,6 @@ impl PaymentProcessor {
 
 #[cfg(test)]
 mod property_tests;
+
+#[cfg(test)]
+mod regression_tests;
