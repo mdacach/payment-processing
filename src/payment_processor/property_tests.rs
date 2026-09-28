@@ -171,6 +171,7 @@ impl PaymentModel {
         self.previous_state = Some(ModelSnapshot::from(&*self));
     }
 
+    #[hegel::test_helper]
     fn draw_unused_tx_id(&mut self, tc: &TestCase) -> TxId {
         // This is a naive way of drawing an available transaction id,
         // but it shall suffice for now.
@@ -183,6 +184,7 @@ impl PaymentModel {
         }
     }
 
+    #[hegel::test_helper]
     fn draw_client_id(&mut self, tc: &TestCase) -> ClientId {
         tc.draw(gs::integers::<ClientId>().min_value(0).max_value(10))
     }
