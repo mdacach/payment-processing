@@ -15,11 +15,20 @@ pub(crate) struct Account {
     is_locked: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+// TODO: consider a more comprehensive state machine pattern here, instead of status.
+#[derive(Debug, Clone)]
 pub(crate) struct DepositInfo {
     client_id: ClientId,
-    disputed_count: u16,
     amount: Money,
+    status: DepositStatus,
+}
+
+#[derive(Debug, Clone)]
+enum DepositStatus {
+    Processed,
+    Disputed,
+    Resolved,
+    Chargedback,
 }
 
 // TODO: not sure how I feel about this being Clone, but anyway it's
@@ -70,8 +79,8 @@ impl PaymentProcessor {
 
         let info = DepositInfo {
             client_id,
-            disputed_count: 0,
             amount,
+            status: DepositStatus::Processed,
         };
         self.deposits.insert(tx_id, info);
 
@@ -105,16 +114,17 @@ impl PaymentProcessor {
                     anyhow::bail!("disputed transaction with wrong client id!");
                 }
 
-                // TODO: reason through what happens with multiple disputes.
-                //       might not make sense because associated funds would be
-                //       held multiple times...
-                // Because multiple disputes are allowed, we increment a counter
-                // instead of simply setting a boolean flag.
-                deposit_info.disputed_count += 1;
+                let DepositStatus::Processed = deposit_info.status else {
+                    // A deposit can only be disputed once, so extra requests of
+                    // disputing it are considered an error and ignored.
+                    anyhow::bail!("deposit has already been disputed");
+                };
 
                 // TODO: double-check whether to allow negative available funds,
                 //       in the case where a disputed deposit has already been
                 //       withdrawn.
+
+                deposit_info.status = DepositStatus::Disputed;
                 // A disputed deposit freezes associated funds.
                 account.available -= deposit_info.amount;
                 account.held += deposit_info.amount;
@@ -142,13 +152,12 @@ impl PaymentProcessor {
                     anyhow::bail!("resolve transaction with wrong client id!");
                 }
 
-                if deposit_info.disputed_count == 0 {
-                    anyhow::bail!("resolve non-disputed deposit");
-                }
+                let DepositStatus::Disputed = deposit_info.status else {
+                    // A resolve must only refer to a deposit that is currently being disputed.
+                    anyhow::bail!("attemt to resolve not-currently-disputed deposit");
+                };
 
-                // TODO: yeah, probably can't have multiple disputes. will need to change this.
-                deposit_info.disputed_count -= 1;
-
+                deposit_info.status = DepositStatus::Resolved;
                 // The dispute had previously frozen the associated funds for this deposit,
                 // but now that it has been resolved, the funds are released.
                 account.available += deposit_info.amount;
@@ -178,13 +187,12 @@ impl PaymentProcessor {
                     anyhow::bail!("chargeback transaction with wrong client id!");
                 }
 
-                if deposit_info.disputed_count == 0 {
-                    anyhow::bail!("chargeback non-disputed deposit");
-                }
+                let DepositStatus::Disputed = deposit_info.status else {
+                    // A chargeback must only refer to a deposit that is currently being disputed.
+                    anyhow::bail!("attemt to chargeback not-currently-disputed deposit");
+                };
 
-                // TODO: yeah, probably can't have multiple disputes. will need to change this.
-                deposit_info.disputed_count -= 1;
-
+                deposit_info.status = DepositStatus::Chargedback;
                 // In the case of a chargeback, the frozen funds have been withdrawn.
                 account.held -= deposit_info.amount;
                 account.total -= deposit_info.amount;
