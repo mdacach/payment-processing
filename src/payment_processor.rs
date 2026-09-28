@@ -41,6 +41,8 @@ pub(crate) struct PaymentProcessor {
 
 impl PaymentProcessor {
     pub(crate) fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
+        self.maybe_prevent_locked_account(event)?;
+
         match event {
             Event::Deposit {
                 client_id,
@@ -214,6 +216,22 @@ impl PaymentProcessor {
 impl PaymentProcessor {
     pub(crate) fn account(&self, client_id: u16) -> Option<&Account> {
         self.accounts.get(&client_id)
+    }
+
+    // TODO: investigate how to make this more secure. there are some patterns that could be in handy,
+    //       like witness: https://arxiv.org/pdf/2307.07069
+    fn maybe_prevent_locked_account(&self, event: Event) -> anyhow::Result<()> {
+        // In this system, a client only has a single account and that account
+        // is identifiable by the client's id.
+        let account_id = event.client_id();
+        if let Some(account) = self.account(*account_id) {
+            if account.is_locked {
+                // TODO: when reworking errors, make sure to add relevant context, like account ids.
+                anyhow::bail!("account referred by event is locked");
+            }
+        }
+
+        Ok(())
     }
 }
 
