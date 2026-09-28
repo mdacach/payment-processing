@@ -1,4 +1,5 @@
 mod event;
+pub mod event_csv;
 mod payment_processor;
 mod types;
 

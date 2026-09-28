@@ -109,3 +109,20 @@ fn rejected_transaction_does_not_stop_later_rows() {
     assert!(stderr.contains("record_number=3"), "{stderr}");
     assert!(stderr.contains("rejected=1"), "{stderr}");
 }
+
+#[test]
+fn generated_dispute_trace_is_accepted_by_binary() {
+    let output = Command::new(env!("CARGO_BIN_EXE_payment-processing"))
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/samples/generated/dispute-lifecycle.csv"
+        ))
+        .output()
+        .expect("run generated fixture");
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("client,available,held,total,locked\n"));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("rows=80"), "{stderr}");
+    assert_eq!(stderr.matches("transaction rejected").count(), 29);
+}

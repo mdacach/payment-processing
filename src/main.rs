@@ -1,8 +1,7 @@
-use std::{env, fs::File, io, path::Path};
+use std::{env, io, path::Path};
 
-use anyhow::{bail, Context, Result};
-use csv::{StringRecord, Trim};
-use payment_processing::{Event, Money, PaymentProcessor};
+use anyhow::{Context, Result, bail};
+use payment_processing::{PaymentProcessor, event_csv};
 use tracing::{info, warn};
 
 fn main() -> Result<()> {
@@ -33,33 +32,7 @@ fn main() -> Result<()> {
 }
 
 fn run(path: &Path) -> Result<()> {
-    let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-    let mut reader = csv::ReaderBuilder::new().trim(Trim::All).from_reader(file);
-
-    let headers = reader
-        .headers()
-        .with_context(|| format!("{}: record 1: reading header", path.display()))?;
-    if !headers.iter().eq(["type", "client", "tx", "amount"]) {
-        bail!(
-            "{}: record 1: expected header type,client,tx,amount",
-            path.display()
-        );
-    }
-
-    let events: Vec<(usize, Event)> = reader
-        .records()
-        .enumerate()
-        .map(|(index, record)| {
-            let record_number = index + 2;
-            let event = record
-                .with_context(|| format!("{}: record {record_number}", path.display()))
-                .and_then(|record| {
-                    parse_event(&record)
-                        .with_context(|| format!("{}: record {record_number}", path.display()))
-                })?;
-            Ok((record_number, event))
-        })
-        .collect::<Result<_>>()?;
+    let events = event_csv::read_events(path)?;
 
     info!(path = %path.display(), rows = events.len(), "parsed transactions");
 
@@ -89,64 +62,4 @@ fn run(path: &Path) -> Result<()> {
 
     info!(accounts, rejected, "processing complete");
     Ok(())
-}
-
-fn parse_event(record: &StringRecord) -> Result<Event> {
-    let kind = record.get(0).context("missing type")?;
-    let client_id = record
-        .get(1)
-        .context("missing client")?
-        .parse()
-        .context("invalid client ID")?;
-    let tx_id = record
-        .get(2)
-        .context("missing tx")?
-        .parse()
-        .context("invalid transaction ID")?;
-    let amount = record.get(3).context("missing amount column")?;
-
-    match kind {
-        "deposit" => Ok(Event::Deposit {
-            client_id,
-            tx_id,
-            amount: parse_amount(amount)?,
-        }),
-        "withdrawal" => Ok(Event::Withdrawal {
-            client_id,
-            tx_id,
-            amount: parse_amount(amount)?,
-        }),
-        "dispute" => Ok(Event::Dispute {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        "resolve" => Ok(Event::Resolve {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        "chargeback" => Ok(Event::Chargeback {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        _ => bail!("unknown transaction type: {kind}"),
-    }
-}
-
-fn parse_amount(raw: &str) -> Result<Money> {
-    let truncated = if let Some((whole, fraction)) = raw.split_once('.') {
-        if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-            bail!("invalid amount: {raw}");
-        }
-        if fraction.len() > 4 {
-            format!("{whole}.{}", &fraction[..4])
-        } else {
-            raw.to_owned()
-        }
-    } else {
-        raw.to_owned()
-    };
-
-    truncated
-        .parse()
-        .with_context(|| format!("invalid amount: {raw}"))
 }

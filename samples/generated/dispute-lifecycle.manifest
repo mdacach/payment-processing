@@ -1,0 +1,17 @@
+format_version=1
+hegeltest_version=0.47.4
+profile=dispute-lifecycle
+seed=1
+steps=80
+client_range=1..=3
+deposit_mantissa_range=1..=10000000000
+withdrawal_mantissa_range=1..=5000000000
+rule_weights=[8.0, 4.0, 5.0, 1.0, 4.0, 4.0]
+required_row_range=50..=100
+required_client_range=2..=3
+minimum_event_counts=[1, 1, 1, 1, 1]
+require_rejection=false
+rows=80
+clients=3
+event_counts=[28, 15, 23, 11, 3]
+rejected=29

@@ -1,0 +1,17 @@
+format_version=1
+hegeltest_version=0.47.4
+profile=many-clients-long
+seed=1
+steps=800
+client_range=1..=10
+deposit_mantissa_range=1..=10000000000
+withdrawal_mantissa_range=1..=5000000000
+rule_weights=[10.0, 6.0, 3.0, 1.0, 2.0, 0.1]
+required_row_range=500..=1000
+required_client_range=8..=10
+minimum_event_counts=[1, 1, 1, 1, 1]
+require_rejection=false
+rows=800
+clients=10
+event_counts=[387, 212, 155, 41, 5]
+rejected=200

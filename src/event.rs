@@ -2,7 +2,7 @@ use crate::types::{ClientId, Money, TxId};
 
 // TODO: consider creating newtypes for values used here.
 // TODO: add documentation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     Deposit {
         client_id: ClientId,
