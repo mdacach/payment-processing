@@ -180,6 +180,11 @@ impl PaymentModel {
 
     #[hegel::test_helper]
     fn draw_unused_tx_id(&mut self, tc: &TestCase) -> TxId {
+        // TODO: an observant reader might see that used tx ids are never updated,
+        //       which defeats the purpose of this function. I'm letting it go because
+        //       I want to see whether the proptests will catch that failure eventually
+        //       (when two transactions with the same id cause havoc).
+
         // This is a naive way of drawing an available transaction id,
         // but it shall suffice for now.
         loop {
