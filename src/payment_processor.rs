@@ -6,13 +6,31 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Account {
+pub struct Account {
     // TODO: decide whether to allow negative totals. a possible scenario that would
     //       create a negative total is a deposit that is withdrawn and then disputed.
     total: Money,
     available: Money,
     held: Money,
     is_locked: bool,
+}
+
+impl Account {
+    pub fn total(&self) -> Money {
+        self.total
+    }
+
+    pub fn available(&self) -> Money {
+        self.available
+    }
+
+    pub fn held(&self) -> Money {
+        self.held
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.is_locked
+    }
 }
 
 // TODO: consider a more comprehensive state machine pattern here, instead of status.
@@ -34,13 +52,13 @@ enum DepositStatus {
 // TODO: not sure how I feel about this being Clone, but anyway it's
 //       not too bad here.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PaymentProcessor {
+pub struct PaymentProcessor {
     accounts: BTreeMap<ClientId, Account>,
     deposits: BTreeMap<TxId, DepositInfo>,
 }
 
 impl PaymentProcessor {
-    pub(crate) fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
+    pub fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
         self.maybe_prevent_locked_account(event)?;
 
         match event {
@@ -214,7 +232,7 @@ impl PaymentProcessor {
 }
 
 impl PaymentProcessor {
-    pub(crate) fn account(&self, client_id: u16) -> Option<&Account> {
+    pub fn account(&self, client_id: ClientId) -> Option<&Account> {
         self.accounts.get(&client_id)
     }
 

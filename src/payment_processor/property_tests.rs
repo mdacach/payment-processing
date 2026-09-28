@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use hegel::{generators as gs, TestCase};
+use hegel::{TestCase, generators as gs};
 
 // TODO: think about an oracle to test against.
 // TODO: come up with more invariants.
