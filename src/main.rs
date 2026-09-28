@@ -1,6 +1,6 @@
 use std::{env, fs::File, io, path::Path};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use csv::{StringRecord, Trim};
 use payment_processing::{Event, Money, PaymentProcessor};
 use tracing::{info, warn};
