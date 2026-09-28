@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::*;
-use hegel::{generators as gs, TestCase};
+use hegel::{TestCase, generators as gs};
 
 // TODO: think about an oracle to test against.
 // TODO: come up with more invariants.
@@ -32,7 +32,12 @@ impl PaymentModel {
     fn deposit(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
-        let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(1_000_000));
+        let units = tc.draw(
+            gs::integers::<i64>()
+                .min_value(10_000)
+                .max_value(10_000_000_000),
+        );
+        let amount = Money::from_minor_units(units);
 
         tc.note(&format!("deposit for client {client_id}, amount {amount}"));
         let deposit = Event::Deposit {
@@ -56,7 +61,12 @@ impl PaymentModel {
     fn withdrawal(&mut self, tc: TestCase) {
         let tx_id = self.draw_unused_tx_id(&tc);
         let client_id = self.draw_client_id(&tc);
-        let amount = tc.draw(gs::integers::<Money>().min_value(1).max_value(500_000));
+        let units = tc.draw(
+            gs::integers::<i64>()
+                .min_value(10_000)
+                .max_value(5_000_000_000),
+        );
+        let amount = Money::from_minor_units(units);
 
         tc.note(&format!(
             "withdrawal for client {client_id}, amount {amount}"
@@ -217,21 +227,30 @@ impl PaymentModel {
     #[invariant(always_run)]
     fn available_is_total_minus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.available, account.total - account.held);
+            assert_eq!(
+                account.available,
+                account.total.checked_sub(account.held).unwrap()
+            );
         }
     }
 
     #[invariant(always_run)]
     fn held_is_total_minus_available(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.held, account.total - account.available);
+            assert_eq!(
+                account.held,
+                account.total.checked_sub(account.available).unwrap()
+            );
         }
     }
 
     #[invariant(always_run)]
     fn total_is_available_plus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.total, account.available + account.held);
+            assert_eq!(
+                account.total,
+                account.available.checked_add(account.held).unwrap()
+            );
         }
     }
 

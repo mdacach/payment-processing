@@ -75,15 +75,16 @@ impl PaymentProcessor {
         tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-        account.total += amount;
-        account.available += amount;
+        let mut account = self.accounts.get(&client_id).cloned().unwrap_or_default();
+        account.total = add_money(account.total, amount)?;
+        account.available = add_money(account.available, amount)?;
 
         let info = DepositInfo {
             client_id,
             amount,
             status: DepositStatus::Processed,
         };
+        self.accounts.insert(client_id, account);
         self.deposits.insert(tx_id, info);
 
         Ok(())
@@ -95,21 +96,20 @@ impl PaymentProcessor {
         _tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
+        let mut account = self.accounts.get(&client_id).cloned().unwrap_or_default();
         if account.available < amount {
             anyhow::bail!("insufficient funds");
         }
 
-        account.total -= amount;
-        account.available -= amount;
+        account.total = subtract_money(account.total, amount)?;
+        account.available = subtract_money(account.available, amount)?;
+        self.accounts.insert(client_id, account);
 
         Ok(())
     }
 
     fn handle_dispute(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+        let amount = match self.deposits.get(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -126,28 +126,26 @@ impl PaymentProcessor {
                 //       in the case where a disputed deposit has already been
                 //       withdrawn.
 
-                deposit_info.status = DepositStatus::Disputed;
-                // A disputed deposit freezes associated funds.
-                account.available -= deposit_info.amount;
-                account.held += deposit_info.amount;
-
-                // This dispute should eventually be resolved either through a
-                // [`Resolve`] or a [`Chargeback`].
+                deposit_info.amount
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
                 //       no-tx-at-all and no-deposit.
                 anyhow::bail!("only deposits can be disputed");
             }
-        }
+        };
+
+        let mut account = self.accounts.get(&client_id).cloned().unwrap_or_default();
+        account.available = subtract_money(account.available, amount)?;
+        account.held = add_money(account.held, amount)?;
+        self.accounts.insert(client_id, account);
+        self.deposits.get_mut(&referred_tx_id).unwrap().status = DepositStatus::Disputed;
 
         Ok(())
     }
 
     fn handle_resolve(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+        let amount = match self.deposits.get(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -159,18 +157,20 @@ impl PaymentProcessor {
                     anyhow::bail!("attemt to resolve not-currently-disputed deposit");
                 };
 
-                deposit_info.status = DepositStatus::Resolved;
-                // The dispute had previously frozen the associated funds for this deposit,
-                // but now that it has been resolved, the funds are released.
-                account.available += deposit_info.amount;
-                account.held -= deposit_info.amount;
+                deposit_info.amount
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
                 //       no-tx-at-all and no-deposit.
                 anyhow::bail!("only deposits can be disputed");
             }
-        }
+        };
+
+        let mut account = self.accounts.get(&client_id).cloned().unwrap_or_default();
+        account.available = add_money(account.available, amount)?;
+        account.held = subtract_money(account.held, amount)?;
+        self.accounts.insert(client_id, account);
+        self.deposits.get_mut(&referred_tx_id).unwrap().status = DepositStatus::Resolved;
 
         Ok(())
     }
@@ -180,9 +180,7 @@ impl PaymentProcessor {
         client_id: ClientId,
         referred_tx_id: TxId,
     ) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+        let amount = match self.deposits.get(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -194,23 +192,34 @@ impl PaymentProcessor {
                     anyhow::bail!("attemt to chargeback not-currently-disputed deposit");
                 };
 
-                deposit_info.status = DepositStatus::Chargedback;
-                // In the case of a chargeback, the frozen funds have been withdrawn.
-                account.held -= deposit_info.amount;
-                account.total -= deposit_info.amount;
-
-                // As part of fraud detection, a chargeback causes a client's account to be locked.
-                account.is_locked = true;
+                deposit_info.amount
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
                 //       no-tx-at-all and no-deposit.
                 anyhow::bail!("only deposits can be disputed");
             }
-        }
+        };
+
+        let mut account = self.accounts.get(&client_id).cloned().unwrap_or_default();
+        account.held = subtract_money(account.held, amount)?;
+        account.total = subtract_money(account.total, amount)?;
+        account.is_locked = true;
+        self.accounts.insert(client_id, account);
+        self.deposits.get_mut(&referred_tx_id).unwrap().status = DepositStatus::Chargedback;
 
         Ok(())
     }
+}
+
+fn add_money(left: Money, right: Money) -> anyhow::Result<Money> {
+    left.checked_add(right)
+        .ok_or_else(|| anyhow::anyhow!("money addition overflow"))
+}
+
+fn subtract_money(left: Money, right: Money) -> anyhow::Result<Money> {
+    left.checked_sub(right)
+        .ok_or_else(|| anyhow::anyhow!("money subtraction overflow"))
 }
 
 impl PaymentProcessor {
