@@ -299,7 +299,7 @@ impl PaymentModel {
     // #[invariant(always_run)]
     // fn total_is_non_negative(&self, _: TestCase) {
     //     for account in self.processor.accounts.values() {
-    //         assert!(account.total >= 0); // TODO: might change if we allow negative totals.
+    //         assert!(account.total() >= 0); // TODO: might change if we allow negative totals.
     //     }
     // }
 
@@ -308,21 +308,21 @@ impl PaymentModel {
     #[invariant(always_run)]
     fn available_is_total_minus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.available, account.total - account.held);
+            assert_eq!(account.available(), account.total() - account.held());
         }
     }
 
     #[invariant(always_run)]
     fn held_is_total_minus_available(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.held, account.total - account.available);
+            assert_eq!(account.held(), account.total() - account.available());
         }
     }
 
     #[invariant(always_run)]
     fn total_is_available_plus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.total, account.available + account.held);
+            assert_eq!(account.total(), account.available() + account.held());
         }
     }
 
@@ -335,17 +335,17 @@ impl PaymentModel {
         let current_accounts = &self.processor.accounts;
 
         for (id, previous_account) in &previous.processor.accounts {
-            if previous_account.is_locked {
+            if previous_account.is_locked() {
                 let current_account = current_accounts
                     .get(&id)
                     .unwrap_or_else(|| panic!("previously locked account {id} is missing!"));
 
                 // TODO: consider using an Eq implementation here instead of
                 //       comparing each field separately.
-                assert_eq!(previous_account.available, current_account.available);
-                assert_eq!(previous_account.held, current_account.held);
-                assert_eq!(previous_account.total, current_account.total);
-                assert_eq!(previous_account.is_locked, current_account.is_locked);
+                assert_eq!(previous_account.available(), current_account.available());
+                assert_eq!(previous_account.held(), current_account.held());
+                assert_eq!(previous_account.total(), current_account.total());
+                assert_eq!(previous_account.is_locked(), current_account.is_locked());
             }
         }
     }
