@@ -4,10 +4,13 @@ use anyhow::{Context, Result, bail};
 use csv::{StringRecord, Trim};
 use payment_processing::{Event, Money, PaymentProcessor};
 use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
-    // TODO: audit this configuration.
+    // Keep account CSV on stdout and filter stderr logs with RUST_LOG.
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
+        .with_env_filter(filter)
         .with_writer(io::stderr)
         .with_target(false)
         .with_ansi(false)
