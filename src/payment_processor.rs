@@ -5,38 +5,8 @@ use crate::{
     types::{ClientId, Money, TxId},
 };
 
-// TODO: consider a state machine design here, where a locked account is a final state.
-#[derive(Debug, Clone, Default)]
-pub struct Account {
-    // TODO: decide whether to allow negative totals. a possible scenario that would
-    //       create a negative total is a deposit that is withdrawn and then disputed.
-    total: Money,
-    available: Money,
-    held: Money,
-    is_locked: bool,
-}
-
-// TODO: consider creating specific functions to atomically update an account
-//       such as "deposit" or "withdraw". that way we have more control over
-//       how the balances are updated, and can better assure that the transitions
-//       make sense.
-impl Account {
-    pub fn total(&self) -> Money {
-        self.total
-    }
-
-    pub fn available(&self) -> Money {
-        self.available
-    }
-
-    pub fn held(&self) -> Money {
-        self.held
-    }
-
-    pub fn is_locked(&self) -> bool {
-        self.is_locked
-    }
-}
+mod account;
+pub use account::Account;
 
 // TODO: consider a more comprehensive state machine pattern here, instead of status.
 #[derive(Debug, Clone)]
