@@ -172,12 +172,10 @@ impl PaymentModel {
         ));
     }
 
-    // TODO: I think I like generating resolves and chargebacks for random transactions as well.
-
     /// Generates a resolve event that refers to a currently-disputed deposit
     /// that can be resolved.
     #[rule(weight = 2)]
-    fn resolve(&mut self, tc: TestCase) {
+    fn resolve_disputed_deposit(&mut self, tc: TestCase) {
         // Destructuring it immediately makes Hegel not annotate the draw by its name.
         let resolved_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
         let (client_id, tx_id) = resolved_deposit;
@@ -199,10 +197,37 @@ impl PaymentModel {
         ));
     }
 
+    /// Generates a resolve event that refers to a random transaction.
+    ///
+    /// The referred transaction will probably not be a disputed deposit, so
+    /// this exercises rejection of ill-formed resolve requests.
+    #[rule(weight = 1)]
+    fn resolve_random(&mut self, tc: TestCase) {
+        tc.event("resolve random");
+        let client_id = self.draw_client_id(&tc);
+        let random_tx_id = tc.draw(gs::integers::<TxId>());
+
+        tc.note(&format!(
+            "resolve for client {client_id}, random_tx_id {random_tx_id}; tx_id probably doesn't exist"
+        ));
+
+        let resolve = Event::Resolve {
+            client_id,
+            referred_tx_id: random_tx_id,
+        };
+        let result = self.processor.on_event(resolve);
+        tc.note(&format!("result: {result:?}"));
+
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
+    }
+
     /// Generates a chargeback event that refers to a currently-disputed deposit
     /// that can be chargedback.
     #[rule(weight = 2)]
-    fn chargeback(&mut self, tc: TestCase) {
+    fn chargeback_disputed_deposit(&mut self, tc: TestCase) {
         // Destructuring it immediately makes Hegel not annotate the draw by its name.
         let chargedback_deposit = tc.draw(self.currently_disputed_deposits.values_consumed());
         let (client_id, tx_id) = chargedback_deposit;
@@ -219,6 +244,33 @@ impl PaymentModel {
         tc.note(&format!("result: {result:?}"));
 
         // TODO: there should be a more ergonomic way of printing something after every rule.
+        tc.note(&format!(
+            "updated account: {:?}",
+            self.processor.account(client_id)
+        ));
+    }
+
+    /// Generates a chargeback event that refers to a random transaction.
+    ///
+    /// The referred transaction will probably not be a disputed deposit, so
+    /// this exercises rejection of ill-formed chargeback requests.
+    #[rule(weight = 1)]
+    fn chargeback_random(&mut self, tc: TestCase) {
+        tc.event("chargeback random");
+        let client_id = self.draw_client_id(&tc);
+        let random_tx_id = tc.draw(gs::integers::<TxId>());
+
+        tc.note(&format!(
+            "chargeback for client {client_id}, random_tx_id {random_tx_id}; tx_id probably doesn't exist"
+        ));
+
+        let chargeback = Event::Chargeback {
+            client_id,
+            referred_tx_id: random_tx_id,
+        };
+        let result = self.processor.on_event(chargeback);
+        tc.note(&format!("result: {result:?}"));
+
         tc.note(&format!(
             "updated account: {:?}",
             self.processor.account(client_id)
