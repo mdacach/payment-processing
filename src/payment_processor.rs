@@ -32,9 +32,14 @@ pub struct PaymentProcessor {
 }
 
 impl PaymentProcessor {
-    // The system attempt at handling an event.
-    //
-    // Events are dispatched to specific handlers.
+    /// Applies an event to the client's account and returns an error if it is rejected.
+    ///
+    /// A locked account rejects every further operation, including disputes,
+    /// resolves, and chargebacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the account is locked or the event cannot be applied.
     pub fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
         // TODO: add witness pattern instead of this if.
         self.maybe_prevent_locked_account(event)?;
@@ -73,6 +78,7 @@ impl PaymentProcessor {
         tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
+        validate_movement_amount(amount)?;
         let account = self.accounts.entry(client_id).or_default();
         account.deposit(amount)?;
 
@@ -97,6 +103,7 @@ impl PaymentProcessor {
         _tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
+        validate_movement_amount(amount)?;
         let account = self.accounts.entry(client_id).or_default();
         account.withdrawal(amount)?;
 
@@ -219,6 +226,16 @@ impl PaymentProcessor {
 
         Ok(())
     }
+}
+
+/// Deposits and withdrawals must be between 0.0001 and 10,000,000.0000.
+fn validate_movement_amount(amount: Money) -> anyhow::Result<()> {
+    let minimum = Money::from_mantissa(1);
+    let maximum = Money::from_mantissa(100_000_000_000);
+    if amount < minimum || amount > maximum {
+        anyhow::bail!("amount must be between 0.0001 and 10000000.0000");
+    }
+    Ok(())
 }
 
 impl PaymentProcessor {

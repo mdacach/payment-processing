@@ -16,7 +16,8 @@ pub enum Event {
         client_id: ClientId,
         /// This deposit's transaction ID.
         tx_id: TxId,
-        /// The amount credited to the account.
+        // TODO: "parse, not validate" would be better here.
+        /// The amount credited to the account (0.0001 to 10,000,000 inclusive).
         amount: Money,
     },
     /// Debits the client's available and total funds.
@@ -28,7 +29,7 @@ pub enum Event {
         client_id: ClientId,
         /// This withdrawal's transaction ID.
         tx_id: TxId,
-        /// The amount withdrawn from the account.
+        /// The amount withdrawn from the account (0.0001 to 10,000,000 inclusive).
         amount: Money,
     },
     /// Holds the funds associated with an earlier deposit.
