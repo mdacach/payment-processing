@@ -24,8 +24,7 @@ enum DepositStatus {
     Chargedback,
 }
 
-// TODO: not sure how I feel about this being Clone, but anyway it's
-//       not too bad here.
+/// Processes events in order and tracks each client's account and deposits.
 #[derive(Debug, Clone, Default)]
 pub struct PaymentProcessor {
     accounts: BTreeMap<ClientId, Account>,
@@ -75,8 +74,7 @@ impl PaymentProcessor {
         amount: Money,
     ) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
-        account.total += amount;
-        account.available += amount;
+        account.deposit(amount)?;
 
         let info = DepositInfo {
             client_id,
@@ -100,12 +98,7 @@ impl PaymentProcessor {
         amount: Money,
     ) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
-        if account.available < amount {
-            anyhow::bail!("insufficient funds");
-        }
-
-        account.total -= amount;
-        account.available -= amount;
+        account.withdrawal(amount)?;
 
         Ok(())
     }
@@ -136,10 +129,9 @@ impl PaymentProcessor {
                 //       in the case where a disputed deposit has already been
                 //       withdrawn.
 
-                deposit_info.status = DepositStatus::Disputed;
                 // A disputed deposit freezes associated funds.
-                account.available -= deposit_info.amount;
-                account.held += deposit_info.amount;
+                account.dispute(deposit_info.amount)?;
+                deposit_info.status = DepositStatus::Disputed;
 
                 // This dispute should eventually be resolved either through a
                 // [`Resolve`] or a [`Chargeback`].
@@ -174,11 +166,10 @@ impl PaymentProcessor {
                     anyhow::bail!("attemt to resolve not-currently-disputed deposit");
                 };
 
-                deposit_info.status = DepositStatus::Resolved;
                 // The dispute had previously frozen the associated funds for this deposit,
                 // but now that it has been resolved, the funds are released.
-                account.available += deposit_info.amount;
-                account.held -= deposit_info.amount;
+                account.resolve(deposit_info.amount)?;
+                deposit_info.status = DepositStatus::Resolved;
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
@@ -215,13 +206,9 @@ impl PaymentProcessor {
                     anyhow::bail!("attemt to chargeback not-currently-disputed deposit");
                 };
 
-                deposit_info.status = DepositStatus::Chargedback;
                 // In the case of a chargeback, the frozen funds have been withdrawn.
-                account.held -= deposit_info.amount;
-                account.total -= deposit_info.amount;
-
-                // As part of fraud detection, a chargeback causes a client's account to be locked.
-                account.is_locked = true;
+                account.chargeback(deposit_info.amount)?;
+                deposit_info.status = DepositStatus::Chargedback;
             }
             None => {
                 // TODO: might be worthwhile to differentiate between
@@ -235,10 +222,12 @@ impl PaymentProcessor {
 }
 
 impl PaymentProcessor {
+    /// Returns the account for a client, if one has been created.
     pub fn account(&self, client_id: ClientId) -> Option<&Account> {
         self.accounts.get(&client_id)
     }
 
+    /// Iterates over client accounts in client ID order.
     pub fn accounts(&self) -> impl Iterator<Item = (ClientId, &Account)> {
         self.accounts
             .iter()
@@ -252,7 +241,7 @@ impl PaymentProcessor {
         // is identifiable by the client's id.
         let account_id = event.client_id();
         if let Some(account) = self.account(*account_id) {
-            if account.is_locked {
+            if account.is_locked() {
                 // TODO: when reworking errors, make sure to add relevant context, like account ids.
                 anyhow::bail!("account referred by event is locked");
             }
