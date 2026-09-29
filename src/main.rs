@@ -49,6 +49,8 @@ fn run(path: &Path) -> Result<()> {
         );
     }
 
+    // The events are materialized all at once. Streaming could be an improvement,
+    // but is out of scope for now.
     let events: Vec<(usize, Event)> = reader
         .records()
         .enumerate()
@@ -69,12 +71,15 @@ fn run(path: &Path) -> Result<()> {
     let mut processor = PaymentProcessor::default();
     let mut rejected = 0;
     for (record_number, event) in events {
+        // Errors while processing the transactions are reported through warning
+        // logs, but processing other transactions continues normally.
         if let Err(error) = processor.on_event(event) {
             rejected += 1;
             warn!(record_number, ?event, %error, "transaction rejected");
         }
     }
 
+    // Output is written as CSV according to the README's format.
     let mut writer = csv::Writer::from_writer(io::stdout().lock());
     writer.write_record(["client", "available", "held", "total", "locked"])?;
     let mut accounts = 0;
@@ -94,6 +99,7 @@ fn run(path: &Path) -> Result<()> {
     Ok(())
 }
 
+// Parses an event that can be processed by the system from a CSV record.
 fn parse_event(record: &StringRecord) -> Result<Event> {
     let kind = record.get(0).context("missing type")?;
     let client_id = record
@@ -135,6 +141,10 @@ fn parse_event(record: &StringRecord) -> Result<Event> {
     }
 }
 
+// TODO: probably reject negative amounts? here or in the system?
+// Parses a fixed-point amount with up to four decimal places.
+//
+// Inputs with more than four decimal places of precision are truncated.
 fn parse_amount(raw: &str) -> Result<Money> {
     let truncated = if let Some((whole, fraction)) = raw.split_once('.') {
         if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {

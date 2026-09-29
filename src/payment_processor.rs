@@ -5,6 +5,7 @@ use crate::{
     types::{ClientId, Money, TxId},
 };
 
+// TODO: consider a state machine design here, where a locked account is a final state.
 #[derive(Debug, Clone, Default)]
 pub struct Account {
     // TODO: decide whether to allow negative totals. a possible scenario that would
@@ -15,6 +16,10 @@ pub struct Account {
     is_locked: bool,
 }
 
+// TODO: consider creating specific functions to atomically update an account
+//       such as "deposit" or "withdraw". that way we have more control over
+//       how the balances are updated, and can better assure that the transitions
+//       make sense.
 impl Account {
     pub fn total(&self) -> Money {
         self.total
@@ -58,7 +63,11 @@ pub struct PaymentProcessor {
 }
 
 impl PaymentProcessor {
+    // The system attempt at handling an event.
+    //
+    // Events are dispatched to specific handlers.
     pub fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
+        // TODO: add witness pattern instead of this if.
         self.maybe_prevent_locked_account(event)?;
 
         match event {
@@ -87,6 +96,8 @@ impl PaymentProcessor {
         }
     }
 
+    /// Credits `amount` to the client's available and total funds and records
+    /// the deposit under `tx_id` so it can be disputed later.
     fn handle_deposit(
         &mut self,
         client_id: ClientId,
@@ -107,6 +118,11 @@ impl PaymentProcessor {
         Ok(())
     }
 
+    /// Debits `amount` from the client's available and total funds.
+    ///
+    /// Rejects the withdrawal without changing either balance if available
+    /// funds are insufficient. The withdrawal's transaction ID is not needed
+    /// after dispatch because only deposits can be disputed.
     fn handle_withdrawal(
         &mut self,
         client_id: ClientId,
@@ -124,6 +140,12 @@ impl PaymentProcessor {
         Ok(())
     }
 
+    /// Holds the amount of the deposit identified by `referred_tx_id`.
+    ///
+    /// Moves that amount from available to held funds without changing total
+    /// funds. Rejects a missing deposit, a deposit owned by another client, or
+    /// one that has already been disputed. Available funds may become negative
+    /// if the client has already spent the deposit.
     fn handle_dispute(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
 
@@ -162,6 +184,11 @@ impl PaymentProcessor {
         Ok(())
     }
 
+    /// Resolves the dispute for the deposit identified by `referred_tx_id`.
+    ///
+    /// Returns the deposit's amount from held to available funds without
+    /// changing total funds. Rejects a missing deposit, a deposit owned by
+    /// another client, or one that is not currently disputed.
     fn handle_resolve(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
         let account = self.accounts.entry(client_id).or_default();
 
@@ -193,6 +220,12 @@ impl PaymentProcessor {
         Ok(())
     }
 
+    /// Reverses a disputed deposit and locks the client's account.
+    ///
+    /// Removes the deposit's amount from held and total funds. The resulting
+    /// total may be negative if the deposited funds were already spent. Rejects
+    /// a missing deposit, a deposit owned by another client, or one that is not
+    /// currently disputed. The lock prevents subsequent events for this client.
     fn handle_chargeback(
         &mut self,
         client_id: ClientId,
@@ -242,7 +275,7 @@ impl PaymentProcessor {
             .map(|(&client_id, account)| (client_id, account))
     }
 
-    // TODO: investigate how to make this more secure. there are some patterns that could be in handy,
+    // TODO: investigate how to make this more secure. there are some patterns that could come in handy,
     //       like witness: https://arxiv.org/pdf/2307.07069
     fn maybe_prevent_locked_account(&self, event: Event) -> anyhow::Result<()> {
         // In this system, a client only has a single account and that account
