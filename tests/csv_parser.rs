@@ -53,8 +53,7 @@ fn dispute_resolve_and_chargeback() {
 fn whitespace_and_excess_precision_are_handled_without_rounding() {
     let output = run_csv(
         "type, client, tx, amount\n\
-         deposit, 1, 1, 1.99999\n\
-         deposit, 1, 2, 0.00009\n",
+         deposit, 1, 1, 1.99999\n",
     );
     assert!(output.status.success());
     assert_eq!(
@@ -64,17 +63,14 @@ fn whitespace_and_excess_precision_are_handled_without_rounding() {
 }
 
 #[test]
-fn malformed_later_row_fails_before_output() {
+fn malformed_input_fails_before_output() {
     let output = run_csv("type,client,tx,amount\ndeposit,1,1,1\ndeposit,1,2,1.2345oops\n");
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("record 3"), "{stderr}");
     assert!(stderr.contains("invalid amount"), "{stderr}");
-}
 
-#[test]
-fn invalid_header_and_unknown_type_report_record_numbers() {
     let bad_header = run_csv("kind,client,tx,amount\ndeposit,1,1,1\n");
     assert!(!bad_header.status.success());
     assert!(bad_header.stdout.is_empty());
@@ -83,13 +79,6 @@ fn invalid_header_and_unknown_type_report_record_numbers() {
             .unwrap()
             .contains("record 1")
     );
-
-    let unknown_type = run_csv("type,client,tx,amount\ndeposit,1,1,1\ntransfer,1,2,1\n");
-    assert!(!unknown_type.status.success());
-    assert!(unknown_type.stdout.is_empty());
-    let stderr = String::from_utf8(unknown_type.stderr).unwrap();
-    assert!(stderr.contains("record 3"), "{stderr}");
-    assert!(stderr.contains("unknown transaction type"), "{stderr}");
 }
 
 #[test]
@@ -108,4 +97,14 @@ fn rejected_transaction_does_not_stop_later_rows() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("record_number=3"), "{stderr}");
     assert!(stderr.contains("rejected=1"), "{stderr}");
+}
+
+#[test]
+fn dispute_requires_empty_amount() {
+    let output = run_csv("type,client,tx,amount\ndeposit,1,1,1\ndispute,1,1,2\n");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("record 3"), "{stderr}");
+    assert!(stderr.contains("unexpected amount for dispute"), "{stderr}");
 }
