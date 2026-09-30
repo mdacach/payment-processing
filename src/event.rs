@@ -78,11 +78,23 @@ impl Event {
         }
     }
 
+    /// This event's transaction ID, or the referred deposit ID for a dispute operation.
+    pub(crate) fn transaction_id(&self) -> TxId {
+        match self {
+            Event::Deposit { tx_id, .. }
+            | Event::Withdrawal { tx_id, .. }
+            | Event::Dispute {
+                referred_tx_id: tx_id,
+                ..
+            }
+            | Event::Resolve {
+                referred_tx_id: tx_id,
+                ..
             }
             | Event::Chargeback {
-                client_id,
-                referred_tx_id: _,
-            } => client_id,
+                referred_tx_id: tx_id,
+                ..
+            } => *tx_id,
         }
     }
 }
