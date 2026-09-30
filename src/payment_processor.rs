@@ -7,6 +7,7 @@ use crate::{
 
 mod account;
 pub use account::Account;
+use account::ActiveAccountGuard;
 
 // TODO: consider a more comprehensive state machine pattern here, instead of status.
 #[derive(Debug, Clone)]
@@ -41,45 +42,47 @@ impl PaymentProcessor {
     ///
     /// Returns an error if the account is locked or the event cannot be applied.
     pub fn on_event(&mut self, event: Event) -> anyhow::Result<()> {
-        // TODO: add witness pattern instead of this if.
-        self.maybe_prevent_locked_account(event)?;
+        let client_id = *event.client_id();
+        let Self { accounts, deposits } = self;
+
+        let mut account = accounts.entry(client_id).or_default().try_active()?;
 
         match event {
             Event::Deposit {
                 client_id,
                 tx_id,
                 amount,
-            } => self.handle_deposit(client_id, tx_id, amount),
+            } => Self::handle_deposit(&mut account, deposits, client_id, tx_id, amount),
             Event::Withdrawal {
-                client_id,
-                tx_id,
+                client_id: _,
+                tx_id: _,
                 amount,
-            } => self.handle_withdrawal(client_id, tx_id, amount),
+            } => Self::handle_withdrawal(&mut account, amount),
             Event::Dispute {
                 client_id,
                 referred_tx_id,
-            } => self.handle_dispute(client_id, referred_tx_id),
+            } => Self::handle_dispute(&mut account, deposits, client_id, referred_tx_id),
             Event::Resolve {
                 client_id,
                 referred_tx_id,
-            } => self.handle_resolve(client_id, referred_tx_id),
+            } => Self::handle_resolve(&mut account, deposits, client_id, referred_tx_id),
             Event::Chargeback {
                 client_id,
                 referred_tx_id,
-            } => self.handle_chargeback(client_id, referred_tx_id),
+            } => Self::handle_chargeback(account, deposits, client_id, referred_tx_id),
         }
     }
 
     /// Credits `amount` to the client's available and total funds and records
     /// the deposit under `tx_id` so it can be disputed later.
     fn handle_deposit(
-        &mut self,
+        account: &mut ActiveAccountGuard<'_>,
+        deposits: &mut BTreeMap<TxId, DepositInfo>,
         client_id: ClientId,
         tx_id: TxId,
         amount: Money,
     ) -> anyhow::Result<()> {
         validate_movement_amount(amount)?;
-        let account = self.accounts.entry(client_id).or_default();
         account.deposit(amount)?;
 
         let info = DepositInfo {
@@ -87,7 +90,7 @@ impl PaymentProcessor {
             amount,
             status: DepositStatus::Processed,
         };
-        self.deposits.insert(tx_id, info);
+        deposits.insert(tx_id, info);
 
         Ok(())
     }
@@ -98,13 +101,10 @@ impl PaymentProcessor {
     /// funds are insufficient. The withdrawal's transaction ID is not needed
     /// after dispatch because only deposits can be disputed.
     fn handle_withdrawal(
-        &mut self,
-        client_id: ClientId,
-        _tx_id: TxId,
+        account: &mut ActiveAccountGuard<'_>,
         amount: Money,
     ) -> anyhow::Result<()> {
         validate_movement_amount(amount)?;
-        let account = self.accounts.entry(client_id).or_default();
         account.withdrawal(amount)?;
 
         Ok(())
@@ -116,10 +116,13 @@ impl PaymentProcessor {
     /// funds. Rejects a missing deposit, a deposit owned by another client, or
     /// one that has already been disputed. Available funds may become negative
     /// if the client has already spent the deposit.
-    fn handle_dispute(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+    fn handle_dispute(
+        account: &mut ActiveAccountGuard<'_>,
+        deposits: &mut BTreeMap<TxId, DepositInfo>,
+        client_id: ClientId,
+        referred_tx_id: TxId,
+    ) -> anyhow::Result<()> {
+        match deposits.get_mut(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -158,10 +161,13 @@ impl PaymentProcessor {
     /// Returns the deposit's amount from held to available funds without
     /// changing total funds. Rejects a missing deposit, a deposit owned by
     /// another client, or one that is not currently disputed.
-    fn handle_resolve(&mut self, client_id: ClientId, referred_tx_id: TxId) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+    fn handle_resolve(
+        account: &mut ActiveAccountGuard<'_>,
+        deposits: &mut BTreeMap<TxId, DepositInfo>,
+        client_id: ClientId,
+        referred_tx_id: TxId,
+    ) -> anyhow::Result<()> {
+        match deposits.get_mut(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -195,13 +201,12 @@ impl PaymentProcessor {
     /// a missing deposit, a deposit owned by another client, or one that is not
     /// currently disputed. The lock prevents subsequent events for this client.
     fn handle_chargeback(
-        &mut self,
+        account: ActiveAccountGuard<'_>,
+        deposits: &mut BTreeMap<TxId, DepositInfo>,
         client_id: ClientId,
         referred_tx_id: TxId,
     ) -> anyhow::Result<()> {
-        let account = self.accounts.entry(client_id).or_default();
-
-        match self.deposits.get_mut(&referred_tx_id) {
+        match deposits.get_mut(&referred_tx_id) {
             Some(deposit_info) => {
                 if deposit_info.client_id != client_id {
                     // Very weird, huh!
@@ -249,22 +254,6 @@ impl PaymentProcessor {
         self.accounts
             .iter()
             .map(|(&client_id, account)| (client_id, account))
-    }
-
-    // TODO: investigate how to make this more secure. there are some patterns that could come in handy,
-    //       like witness: https://arxiv.org/pdf/2307.07069
-    fn maybe_prevent_locked_account(&self, event: Event) -> anyhow::Result<()> {
-        // In this system, a client only has a single account and that account
-        // is identifiable by the client's id.
-        let account_id = event.client_id();
-        if let Some(account) = self.account(*account_id) {
-            if account.is_locked() {
-                // TODO: when reworking errors, make sure to add relevant context, like account ids.
-                anyhow::bail!("account referred by event is locked");
-            }
-        }
-
-        Ok(())
     }
 }
 
