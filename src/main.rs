@@ -1,10 +1,28 @@
 use std::{env, fs::File, io, path::Path};
 
 use anyhow::{Context, Result, bail};
-use csv::{StringRecord, Trim};
-use payment_processing::{Event, Money, PaymentProcessor};
+use csv::Trim;
+use payment_processing::{ClientId, Event, PaymentProcessor, TransactionAmount, TxId};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+
+#[derive(serde::Deserialize)]
+struct CsvRow {
+    #[serde(rename = "type")]
+    kind: String,
+    client: ClientId,
+    tx: TxId,
+    amount: String,
+}
+
+#[derive(serde::Serialize)]
+struct BalanceRow {
+    client: ClientId,
+    available: String,
+    held: String,
+    total: String,
+    locked: bool,
+}
 
 fn main() -> Result<()> {
     // Keep account CSV on stdout and filter stderr logs with RUST_LOG.
@@ -52,16 +70,13 @@ fn run(path: &Path) -> Result<()> {
     // The events are materialized all at once. Streaming could be an improvement,
     // but is out of scope for now.
     let events: Vec<(usize, Event)> = reader
-        .records()
+        .deserialize::<CsvRow>()
         .enumerate()
-        .map(|(index, record)| {
+        .map(|(index, row)| {
             let record_number = index + 2;
-            let event = record
-                .with_context(|| format!("{}: record {record_number}", path.display()))
-                .and_then(|record| {
-                    parse_event(&record)
-                        .with_context(|| format!("{}: record {record_number}", path.display()))
-                })?;
+            let row = row.with_context(|| format!("{}: record {record_number}", path.display()))?;
+            let event = Event::try_from(row)
+                .with_context(|| format!("{}: record {record_number}", path.display()))?;
             Ok((record_number, event))
         })
         .collect::<Result<_>>()?;
@@ -80,17 +95,19 @@ fn run(path: &Path) -> Result<()> {
     }
 
     // Output is written as CSV according to the README's format.
-    let mut writer = csv::Writer::from_writer(io::stdout().lock());
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(io::stdout().lock());
     writer.write_record(["client", "available", "held", "total", "locked"])?;
     let mut accounts = 0;
     for (client_id, account) in processor.accounts() {
-        writer.write_record([
-            client_id.to_string(),
-            format!("{:.4}", account.available()),
-            format!("{:.4}", account.held()),
-            format!("{:.4}", account.total()),
-            account.is_locked().to_string(),
-        ])?;
+        writer.serialize(BalanceRow {
+            client: client_id,
+            available: format!("{:.4}", account.available()),
+            held: format!("{:.4}", account.held()),
+            total: format!("{:.4}", account.total()),
+            locked: account.is_locked(),
+        })?;
         accounts += 1;
     }
     writer.flush()?;
@@ -99,67 +116,75 @@ fn run(path: &Path) -> Result<()> {
     Ok(())
 }
 
-// Parses an event that can be processed by the system from a CSV record.
-fn parse_event(record: &StringRecord) -> Result<Event> {
-    let kind = record.get(0).context("missing type")?;
-    let client_id = record
-        .get(1)
-        .context("missing client")?
-        .parse()
-        .context("invalid client ID")?;
-    let tx_id = record
-        .get(2)
-        .context("missing tx")?
-        .parse()
-        .context("invalid transaction ID")?;
-    let amount = record.get(3).context("missing amount column")?;
+// The parsing happens in two levels. First, we parse the CSV row and make sure
+// that it's structurally valid (done above). Then, we try to convert that row
+// into a valid event by using the requirements of the system, such as deposits
+// having amounts, or values having up to four decimal places of precision.
 
-    match kind {
-        "deposit" => Ok(Event::Deposit {
-            client_id,
-            tx_id,
-            amount: parse_amount(amount)?,
-        }),
-        "withdrawal" => Ok(Event::Withdrawal {
-            client_id,
-            tx_id,
-            amount: parse_amount(amount)?,
-        }),
-        "dispute" => Ok(Event::Dispute {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        "resolve" => Ok(Event::Resolve {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        "chargeback" => Ok(Event::Chargeback {
-            client_id,
-            referred_tx_id: tx_id,
-        }),
-        _ => bail!("unknown transaction type: {kind}"),
+impl TryFrom<CsvRow> for Event {
+    type Error = anyhow::Error;
+
+    fn try_from(row: CsvRow) -> Result<Self> {
+        let CsvRow {
+            kind,
+            client: client_id,
+            tx: tx_id,
+            amount,
+        } = row;
+
+        match kind.as_str() {
+            "deposit" => Ok(Event::Deposit {
+                client_id,
+                tx_id,
+                amount: parse_movement_amount(&kind, &amount)?,
+            }),
+            "withdrawal" => Ok(Event::Withdrawal {
+                client_id,
+                tx_id,
+                amount: parse_movement_amount(&kind, &amount)?,
+            }),
+            "dispute" | "resolve" | "chargeback" if !amount.is_empty() => {
+                bail!("unexpected amount for {kind}: {amount}")
+            }
+            "dispute" => Ok(Event::Dispute {
+                client_id,
+                referred_tx_id: tx_id,
+            }),
+            "resolve" => Ok(Event::Resolve {
+                client_id,
+                referred_tx_id: tx_id,
+            }),
+            "chargeback" => Ok(Event::Chargeback {
+                client_id,
+                referred_tx_id: tx_id,
+            }),
+            _ => bail!("unknown transaction type: {kind}"),
+        }
     }
 }
 
-// TODO: probably reject negative amounts? here or in the system?
-// Parses a fixed-point amount with up to four decimal places.
-//
-// Inputs with more than four decimal places of precision are truncated.
-fn parse_amount(raw: &str) -> Result<Money> {
-    let truncated = if let Some((whole, fraction)) = raw.split_once('.') {
+fn parse_movement_amount(kind: &str, raw: &str) -> Result<TransactionAmount> {
+    if raw.is_empty() {
+        bail!("missing amount for {kind}");
+    }
+
+    let truncated = maybe_truncate(raw)?;
+    truncated
+        .parse()
+        .map_err(|error| anyhow::anyhow!("{error}: {raw}"))
+}
+
+// Discard fractional digits after the fourth without rounding. Validate every
+// digit first so malformed text after the fourth place is not silently ignored.
+fn maybe_truncate(raw: &str) -> Result<String> {
+    if let Some((whole, fraction)) = raw.split_once('.') {
         if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
             bail!("invalid amount: {raw}");
         }
         if fraction.len() > 4 {
-            format!("{whole}.{}", &fraction[..4])
-        } else {
-            raw.to_owned()
+            return Ok(format!("{whole}.{}", &fraction[..4]));
         }
-    } else {
-        raw.to_owned()
-    };
+    }
 
-    truncated
-        .parse()
-        .with_context(|| format!("invalid amount: {raw}"))
+    Ok(raw.to_owned())
 }
