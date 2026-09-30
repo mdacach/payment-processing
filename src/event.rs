@@ -65,29 +65,19 @@ pub enum Event {
     },
 }
 
-// TODO: is there a better way of extracting this information? maybe only with macros?
 impl Event {
     // The affected client by the event. Client identification is specially
     // relevant because locked accounts must be prevented from operating.
     pub(crate) fn client_id(&self) -> &ClientId {
         match self {
-            Event::Deposit {
-                client_id,
-                tx_id: _,
-                amount: _,
-            } => client_id,
-            Event::Withdrawal {
-                client_id,
-                tx_id: _,
-                amount: _,
-            } => client_id,
-            Event::Dispute {
-                client_id,
-                referred_tx_id: _,
-            } => client_id,
-            Event::Resolve {
-                client_id,
-                referred_tx_id: _,
+            Event::Deposit { client_id, .. }
+            | Event::Withdrawal { client_id, .. }
+            | Event::Dispute { client_id, .. }
+            | Event::Resolve { client_id, .. }
+            | Event::Chargeback { client_id, .. } => client_id,
+        }
+    }
+
             }
             | Event::Chargeback {
                 client_id,
