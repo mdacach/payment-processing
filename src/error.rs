@@ -1,6 +1,6 @@
 use crate::{
     payment_processor::AccountError,
-    types::{ClientId, Money, TxId},
+    types::{Balance, ClientId, TransactionAmount, TxId},
 };
 
 /// Error with the reason why an event could not be successfully processed.
@@ -20,8 +20,8 @@ pub enum ProcessorError {
     InsufficientFunds {
         client_id: ClientId,
         tx_id: TxId,
-        available: Money,
-        requested: Money,
+        available: Balance,
+        requested: TransactionAmount,
     },
 
     /// No deposit with referred transaction identifier was found.

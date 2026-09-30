@@ -1,11 +1,14 @@
-use crate::{error::BalanceField, types::Money};
+use crate::{
+    error::BalanceField,
+    types::{Balance, TransactionAmount},
+};
 
 /// A client's available, held, and total funds, and whether the account is locked.
 #[derive(Debug, Clone, Default)]
 pub struct Account {
-    total: Money,
-    available: Money,
-    held: Money,
+    total: Balance,
+    available: Balance,
+    held: Balance,
     is_locked: bool,
 }
 
@@ -21,17 +24,17 @@ impl Account {
     /// Returns the total funds for the account.
     ///
     /// Total funds include funds that are available or held.
-    pub fn total(&self) -> Money {
+    pub fn total(&self) -> Balance {
         self.total
     }
 
     /// Returns the funds available for withdrawal.
-    pub fn available(&self) -> Money {
+    pub fn available(&self) -> Balance {
         self.available
     }
 
     /// Returns the funds currently held for disputes.
-    pub fn held(&self) -> Money {
+    pub fn held(&self) -> Balance {
         self.held
     }
 
@@ -52,18 +55,18 @@ impl ActiveAccountGuard<'_> {
     /// Credits a deposit to available and total funds.
     ///
     /// Returns an error if any of the balances would overflow.
-    pub(super) fn deposit(&mut self, amount: Money) -> Result<(), AccountError> {
-        let total = self
-            .account
-            .total
-            .checked_add(amount)
-            .ok_or(AccountError::Overflow {
-                balance: BalanceField::Total,
-            })?;
+    pub(super) fn deposit(&mut self, amount: TransactionAmount) -> Result<(), AccountError> {
+        let total =
+            self.account
+                .total
+                .checked_add_amount(amount)
+                .ok_or(AccountError::Overflow {
+                    balance: BalanceField::Total,
+                })?;
         let available =
             self.account
                 .available
-                .checked_add(amount)
+                .checked_add_amount(amount)
                 .ok_or(AccountError::Overflow {
                     balance: BalanceField::Available,
                 })?;
@@ -75,25 +78,25 @@ impl ActiveAccountGuard<'_> {
     /// Debits a withdrawal from available and total funds.
     ///
     /// Returns an error if available funds are insufficient.
-    pub(super) fn withdrawal(&mut self, amount: Money) -> Result<(), AccountError> {
-        if self.account.available < amount {
+    pub(super) fn withdrawal(&mut self, amount: TransactionAmount) -> Result<(), AccountError> {
+        if !self.account.available.covers(amount) {
             return Err(AccountError::InsufficientFunds {
                 available: self.account.available,
                 requested: amount,
             });
         }
 
-        let total = self
-            .account
-            .total
-            .checked_sub(amount)
-            .ok_or(AccountError::Overflow {
-                balance: BalanceField::Total,
-            })?;
+        let total =
+            self.account
+                .total
+                .checked_sub_amount(amount)
+                .ok_or(AccountError::Overflow {
+                    balance: BalanceField::Total,
+                })?;
         let available =
             self.account
                 .available
-                .checked_sub(amount)
+                .checked_sub_amount(amount)
                 .ok_or(AccountError::Overflow {
                     balance: BalanceField::Available,
                 })?;
@@ -105,18 +108,18 @@ impl ActiveAccountGuard<'_> {
     /// Holds disputed deposit funds, moving them from available to held.
     ///
     /// Returns an error if the held balance would overflow.
-    pub(super) fn dispute(&mut self, amount: Money) -> Result<(), AccountError> {
+    pub(super) fn dispute(&mut self, amount: TransactionAmount) -> Result<(), AccountError> {
         let available =
             self.account
                 .available
-                .checked_sub(amount)
+                .checked_sub_amount(amount)
                 .ok_or(AccountError::Overflow {
                     balance: BalanceField::Available,
                 })?;
         let held = self
             .account
             .held
-            .checked_add(amount)
+            .checked_add_amount(amount)
             .ok_or(AccountError::Overflow {
                 balance: BalanceField::Held,
             })?;
@@ -128,18 +131,18 @@ impl ActiveAccountGuard<'_> {
     /// Releases disputed deposit funds from held back to available.
     ///
     /// Returns an error if the available balance would overflow.
-    pub(super) fn resolve(&mut self, amount: Money) -> Result<(), AccountError> {
+    pub(super) fn resolve(&mut self, amount: TransactionAmount) -> Result<(), AccountError> {
         let available =
             self.account
                 .available
-                .checked_add(amount)
+                .checked_add_amount(amount)
                 .ok_or(AccountError::Overflow {
                     balance: BalanceField::Available,
                 })?;
         let held = self
             .account
             .held
-            .checked_sub(amount)
+            .checked_sub_amount(amount)
             .ok_or(AccountError::Overflow {
                 balance: BalanceField::Held,
             })?;
@@ -152,21 +155,21 @@ impl ActiveAccountGuard<'_> {
     ///
     /// Note that a chargeback consumes the active account guard, and thus
     /// no other operation can be performed in sequence.
-    pub(super) fn chargeback(self, amount: Money) -> Result<(), AccountError> {
+    pub(super) fn chargeback(self, amount: TransactionAmount) -> Result<(), AccountError> {
         let held = self
             .account
             .held
-            .checked_sub(amount)
+            .checked_sub_amount(amount)
             .ok_or(AccountError::Overflow {
                 balance: BalanceField::Held,
             })?;
-        let total = self
-            .account
-            .total
-            .checked_sub(amount)
-            .ok_or(AccountError::Overflow {
-                balance: BalanceField::Total,
-            })?;
+        let total =
+            self.account
+                .total
+                .checked_sub_amount(amount)
+                .ok_or(AccountError::Overflow {
+                    balance: BalanceField::Total,
+                })?;
         self.account.held = held;
         self.account.total = total;
         self.account.is_locked = true;
@@ -177,6 +180,11 @@ impl ActiveAccountGuard<'_> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum AccountError {
     Locked,
-    InsufficientFunds { available: Money, requested: Money },
-    Overflow { balance: BalanceField },
+    InsufficientFunds {
+        available: Balance,
+        requested: TransactionAmount,
+    },
+    Overflow {
+        balance: BalanceField,
+    },
 }

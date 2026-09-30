@@ -1,4 +1,4 @@
-use crate::types::{ClientId, Money, TxId};
+use crate::types::{ClientId, TransactionAmount, TxId};
 
 /// A transaction event processed against a client's account.
 ///
@@ -16,9 +16,8 @@ pub enum Event {
         client_id: ClientId,
         /// This deposit's transaction ID.
         tx_id: TxId,
-        // TODO: "parse, not validate" would be better here.
-        /// The amount credited to the account (0.0001 to 10,000,000 inclusive).
-        amount: Money,
+        /// The amount credited to the account.
+        amount: TransactionAmount,
     },
     /// Debits the client's available and total funds.
     ///
@@ -29,8 +28,8 @@ pub enum Event {
         client_id: ClientId,
         /// This withdrawal's transaction ID.
         tx_id: TxId,
-        /// The amount withdrawn from the account (0.0001 to 10,000,000 inclusive).
-        amount: Money,
+        /// The amount withdrawn from the account.
+        amount: TransactionAmount,
     },
     /// Holds the funds associated with an earlier deposit.
     ///

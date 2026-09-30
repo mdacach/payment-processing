@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::{
     error::ProcessorError,
     event::Event,
-    types::{ClientId, Money, TxId},
+    types::{ClientId, TransactionAmount, TxId},
 };
 
 mod account;
@@ -15,7 +15,7 @@ use account::ActiveAccountGuard;
 #[derive(Debug, Clone)]
 pub(crate) struct DepositInfo {
     client_id: ClientId,
-    amount: Money,
+    amount: TransactionAmount,
     status: DepositStatus,
 }
 
@@ -87,7 +87,7 @@ impl PaymentProcessor {
         deposits: &mut BTreeMap<TxId, DepositInfo>,
         client_id: ClientId,
         tx_id: TxId,
-        amount: Money,
+        amount: TransactionAmount,
     ) -> Result<(), ProcessorError> {
         account
             .deposit(amount)
@@ -112,7 +112,7 @@ impl PaymentProcessor {
         account: &mut ActiveAccountGuard<'_>,
         client_id: ClientId,
         tx_id: TxId,
-        amount: Money,
+        amount: TransactionAmount,
     ) -> Result<(), ProcessorError> {
         account
             .withdrawal(amount)

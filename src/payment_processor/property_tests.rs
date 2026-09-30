@@ -61,9 +61,10 @@ impl PaymentModel {
         // Considering the fixed-point underlying type, this range represents
         // 0.0001 (the smallest allowed value) to 1_000_000.0000 (a very big
         // deposit!).
-        let amount = Money::from_mantissa(
+        let amount = TransactionAmount::try_from_mantissa(
             tc.draw(gs::integers::<i64>().min_value(1).max_value(10_000_000_000)),
-        );
+        )
+        .expect("generated amount is positive");
 
         tc.note(&format!("deposit for client {client_id}, amount {amount}"));
         let deposit = Event::Deposit {
@@ -93,9 +94,10 @@ impl PaymentModel {
         // Considering the fixed-point underlying type, this range represents
         // 0.0001 (the smallest allowed value) to 500_000.0000 (a very big
         // withdrawal!).
-        let amount = Money::from_mantissa(
+        let amount = TransactionAmount::try_from_mantissa(
             tc.draw(gs::integers::<i64>().min_value(1).max_value(5_000_000_000)),
-        );
+        )
+        .expect("generated amount is positive");
 
         tc.note(&format!(
             "withdrawal for client {client_id}, amount {amount}"
@@ -308,21 +310,30 @@ impl PaymentModel {
     #[invariant(always_run)]
     fn available_is_total_minus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.available(), account.total() - account.held());
+            assert_eq!(
+                account.available(),
+                account.total().checked_sub(account.held()).unwrap()
+            );
         }
     }
 
     #[invariant(always_run)]
     fn held_is_total_minus_available(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.held(), account.total() - account.available());
+            assert_eq!(
+                account.held(),
+                account.total().checked_sub(account.available()).unwrap()
+            );
         }
     }
 
     #[invariant(always_run)]
     fn total_is_available_plus_held(&self, _: TestCase) {
         for account in self.processor.accounts.values() {
-            assert_eq!(account.total(), account.available() + account.held());
+            assert_eq!(
+                account.total(),
+                account.available().checked_add(account.held()).unwrap()
+            );
         }
     }
 
