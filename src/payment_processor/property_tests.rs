@@ -80,10 +80,10 @@ impl PaymentModel {
             self.processor.account(client_id)
         ));
 
-        // TODO: in case of an error, the deposit should not be marked as eligible to be disputed.
-
-        // Mark this deposit as eligible to be disputed later.
-        self.disputable_deposits.add((client_id, tx_id));
+        // Mark this deposit as eligible to be disputed by a later step.
+        if result.is_ok() {
+            self.disputable_deposits.add((client_id, tx_id));
+        }
     }
 
     /// Generates a withdrawal event with valid amounts and unique transaction identifier.
@@ -137,7 +137,9 @@ impl PaymentModel {
         let result = self.processor.on_event(dispute);
         tc.note(&format!("result: {result:?}"));
 
-        self.currently_disputed_deposits.add((client_id, tx_id));
+        if result.is_ok() {
+            self.currently_disputed_deposits.add((client_id, tx_id));
+        }
 
         tc.note(&format!(
             "updated account: {:?}",
