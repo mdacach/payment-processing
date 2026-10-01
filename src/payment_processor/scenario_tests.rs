@@ -1,89 +1,29 @@
 use super::*;
+use crate::types::Balance;
 
-fn money(units: i64) -> Money {
-    Money::try_from(units).expect("test amount is representable")
+fn amount(units: i64) -> TransactionAmount {
+    TransactionAmount::try_from_mantissa(units * 10_000).expect("positive test amount")
 }
 
-fn assert_balances(account: &Account, available: Money, held: Money, total: Money, locked: bool) {
+fn balance(units: i64) -> Balance {
+    Balance::from_mantissa(units * 10_000)
+}
+
+fn amount_mantissa(mantissa: i64) -> TransactionAmount {
+    TransactionAmount::try_from_mantissa(mantissa).expect("positive test amount")
+}
+
+fn assert_balances(
+    account: &Account,
+    available: Balance,
+    held: Balance,
+    total: Balance,
+    locked: bool,
+) {
     assert_eq!(account.available(), available);
     assert_eq!(account.held(), held);
     assert_eq!(account.total(), total);
     assert_eq!(account.is_locked(), locked);
-}
-
-#[test]
-fn deposit_after_chargeback_does_not_mutate_locked_account() {
-    let mut processor = PaymentProcessor::default();
-
-    processor
-        .on_event(Event::Deposit {
-            client_id: 0,
-            tx_id: 0,
-            amount: Money::try_from(1).expect("1 is representable"),
-        })
-        .expect("initial deposit should succeed");
-    processor
-        .on_event(Event::Dispute {
-            client_id: 0,
-            referred_tx_id: 0,
-        })
-        .expect("dispute should succeed");
-    processor
-        .on_event(Event::Chargeback {
-            client_id: 0,
-            referred_tx_id: 0,
-        })
-        .expect("chargeback should succeed");
-
-    let account_before = processor.account(0).expect("account should exist").clone();
-    assert!(
-        account_before.is_locked(),
-        "chargeback should lock the account"
-    );
-
-    // Hegel found that another deposit, even with the same transaction ID,
-    // changes the balance of this locked account.
-    // (That's because I wasn't, in fact, locking accounts. Just marking them
-    // so.)
-    let result = processor.on_event(Event::Deposit {
-        client_id: 0,
-        tx_id: 0,
-        amount: Money::try_from(1).expect("1 is representable"),
-    });
-
-    let account_after = processor
-        .account(0)
-        .expect("locked account should still exist");
-    assert_eq!(account_after.total(), account_before.total());
-    assert_eq!(account_after.available(), account_before.available());
-    assert_eq!(account_after.held(), account_before.held());
-    assert_eq!(account_after.is_locked(), account_before.is_locked());
-    assert!(result.is_err(), "deposit into a locked account should fail");
-}
-
-#[test]
-fn fractional_amounts_keep_four_decimal_places() {
-    let mut processor = PaymentProcessor::default();
-    processor
-        .on_event(Event::Deposit {
-            client_id: 1,
-            tx_id: 1,
-            amount: Money::from_mantissa(10_001), // 1.0001
-        })
-        .expect("fractional deposit should succeed");
-    processor
-        .on_event(Event::Withdrawal {
-            client_id: 1,
-            tx_id: 2,
-            amount: Money::from_mantissa(1), // 0.0001
-        })
-        .expect("smallest fractional withdrawal should succeed");
-
-    let account = processor.account(1).expect("account should exist");
-    let one = Money::try_from(1).expect("1 is representable");
-    assert_eq!(account.total(), one);
-    assert_eq!(account.available(), one);
-    assert_eq!(account.held(), Money::default());
 }
 
 #[test]
@@ -93,14 +33,14 @@ fn spent_deposit_can_be_disputed_and_charged_back() {
         .on_event(Event::Deposit {
             client_id: 1,
             tx_id: 10,
-            amount: money(5),
+            amount: amount(5),
         })
         .expect("deposit should succeed");
     processor
         .on_event(Event::Withdrawal {
             client_id: 1,
             tx_id: 11,
-            amount: money(5),
+            amount: amount(5),
         })
         .expect("withdrawal should succeed");
     processor
@@ -112,9 +52,9 @@ fn spent_deposit_can_be_disputed_and_charged_back() {
 
     assert_balances(
         processor.account(1).unwrap(),
-        money(-5),
-        money(5),
-        money(0),
+        balance(-5),
+        balance(5),
+        balance(0),
         false,
     );
 
@@ -127,206 +67,177 @@ fn spent_deposit_can_be_disputed_and_charged_back() {
 
     assert_balances(
         processor.account(1).unwrap(),
-        money(-5),
-        money(0),
-        money(-5),
+        balance(-5),
+        balance(0),
+        balance(-5),
         true,
     );
 }
 
 #[test]
-fn wrong_client_dispute_does_not_change_deposit_or_accounts() {
+fn insufficient_funds_has_transaction_context() {
+    let mut processor = PaymentProcessor::default();
+    let error = processor
+        .on_event(Event::Withdrawal {
+            client_id: 4,
+            tx_id: 17,
+            amount: amount(3),
+        })
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProcessorError::InsufficientFunds {
+            client_id: 4,
+            tx_id: 17,
+            available: balance(0),
+            requested: amount(3),
+        }
+    );
+    assert_balances(
+        processor.account(4).unwrap(),
+        balance(0),
+        balance(0),
+        balance(0),
+        false,
+    );
+}
+
+#[test]
+fn dispute_lookup_combines_missing_owner_and_state() {
     let mut processor = PaymentProcessor::default();
     processor
         .on_event(Event::Deposit {
             client_id: 1,
             tx_id: 10,
-            amount: money(5),
+            amount: amount(5),
         })
-        .expect("first deposit should succeed");
-    processor
-        .on_event(Event::Deposit {
-            client_id: 2,
-            tx_id: 20,
-            amount: money(1),
-        })
-        .expect("second deposit should succeed");
+        .unwrap();
 
-    assert!(
-        processor
-            .on_event(Event::Dispute {
-                client_id: 2,
-                referred_tx_id: 10,
-            })
-            .is_err()
-    );
-    assert_balances(
-        processor.account(1).unwrap(),
-        money(5),
-        money(0),
-        money(5),
-        false,
-    );
-    assert_balances(
-        processor.account(2).unwrap(),
-        money(1),
-        money(0),
-        money(1),
-        false,
-    );
-
+    for (client_id, referred_tx_id) in [(1, 99), (2, 10)] {
+        assert_eq!(
+            processor
+                .on_event(Event::Dispute {
+                    client_id,
+                    referred_tx_id
+                })
+                .unwrap_err(),
+            ProcessorError::DisputableDepositNotFound {
+                client_id,
+                referred_tx_id
+            }
+        );
+    }
     processor
         .on_event(Event::Dispute {
             client_id: 1,
             referred_tx_id: 10,
         })
-        .expect("owner should still be able to dispute the deposit");
-    assert_balances(
-        processor.account(1).unwrap(),
-        money(0),
-        money(5),
-        money(5),
-        false,
-    );
-}
-
-#[test]
-fn deposit_above_limit_is_rejected_without_mutation() {
-    let mut processor = PaymentProcessor::default();
-    assert!(
-        processor
-            .on_event(Event::Deposit {
-                client_id: 1,
-                tx_id: 9,
-                amount: money(0),
-            })
-            .is_err()
-    );
-    assert!(processor.account(1).is_none());
-
-    processor
-        .on_event(Event::Deposit {
-            client_id: 1,
-            tx_id: 10,
-            amount: money(10_000_000),
-        })
-        .expect("maximum permitted deposit should succeed");
-
-    assert!(
-        processor
-            .on_event(Event::Deposit {
-                client_id: 1,
-                tx_id: 11,
-                amount: Money::from_mantissa(100_000_000_001),
-            })
-            .is_err()
-    );
-    assert_balances(
-        processor.account(1).unwrap(),
-        money(10_000_000),
-        money(0),
-        money(10_000_000),
-        false,
-    );
-    assert!(
+        .unwrap();
+    assert_eq!(
         processor
             .on_event(Event::Dispute {
                 client_id: 1,
-                referred_tx_id: 11,
+                referred_tx_id: 10
             })
-            .is_err(),
-        "rejected deposit must not become disputable"
+            .unwrap_err(),
+        ProcessorError::DisputableDepositNotFound {
+            client_id: 1,
+            referred_tx_id: 10
+        }
     );
-}
-
-#[test]
-fn minimum_and_maximum_deposits_and_withdrawals_are_accepted() {
-    let mut processor = PaymentProcessor::default();
-    for (tx_id, amount) in [(10, Money::from_mantissa(1)), (11, money(10_000_000))] {
-        processor
-            .on_event(Event::Deposit {
-                client_id: 1,
-                tx_id,
-                amount,
-            })
-            .expect("boundary deposit should succeed");
-    }
-    for (tx_id, amount) in [(12, money(10_000_000)), (13, Money::from_mantissa(1))] {
-        processor
-            .on_event(Event::Withdrawal {
-                client_id: 1,
-                tx_id,
-                amount,
-            })
-            .expect("boundary withdrawal should succeed");
-    }
     assert_balances(
         processor.account(1).unwrap(),
-        money(0),
-        money(0),
-        money(0),
+        balance(0),
+        balance(5),
+        balance(5),
         false,
     );
 }
 
 #[test]
-fn zero_and_above_limit_withdrawals_are_rejected_without_mutation() {
+fn settlement_lookup_combines_missing_owner_and_state() {
     let mut processor = PaymentProcessor::default();
     processor
         .on_event(Event::Deposit {
             client_id: 1,
             tx_id: 10,
-            amount: money(10_000_000),
+            amount: amount(5),
         })
-        .expect("deposit should succeed");
-
-    for (tx_id, amount) in [(11, money(0)), (12, Money::from_mantissa(100_000_000_001))] {
-        assert!(
-            processor
-                .on_event(Event::Withdrawal {
-                    client_id: 1,
-                    tx_id,
-                    amount,
-                })
-                .is_err()
-        );
-        assert_balances(
-            processor.account(1).unwrap(),
-            money(10_000_000),
-            money(0),
-            money(10_000_000),
-            false,
-        );
+        .unwrap();
+    for (client_id, referred_tx_id) in [(1, 99), (2, 10), (1, 10)] {
+        for event in [
+            Event::Resolve {
+                client_id,
+                referred_tx_id,
+            },
+            Event::Chargeback {
+                client_id,
+                referred_tx_id,
+            },
+        ] {
+            assert_eq!(
+                processor.on_event(event).unwrap_err(),
+                ProcessorError::EligibleDepositNotFound {
+                    client_id,
+                    referred_tx_id,
+                }
+            );
+        }
     }
-}
-
-#[test]
-fn negative_withdrawal_is_rejected_without_creating_funds() {
-    let mut processor = PaymentProcessor::default();
-    assert!(
-        processor
-            .on_event(Event::Withdrawal {
-                client_id: 1,
-                tx_id: 10,
-                amount: money(-10),
-            })
-            .is_err()
+    assert_balances(
+        processor.account(1).unwrap(),
+        balance(5),
+        balance(0),
+        balance(5),
+        false,
     );
-
-    if let Some(account) = processor.account(1) {
-        assert_balances(account, money(0), money(0), money(0), false);
-    }
 }
 
 #[test]
-fn chargeback_can_settle_an_existing_dispute_after_account_locks() {
+fn balance_overflow_identifies_field_and_does_not_record_deposit() {
     let mut processor = PaymentProcessor::default();
-    for (tx_id, amount) in [(10, 5), (11, 3)] {
+    let maximum = amount_mantissa(i64::MAX);
+    processor
+        .on_event(Event::Deposit {
+            client_id: 1,
+            tx_id: 10,
+            amount: maximum,
+        })
+        .unwrap();
+    let error = processor
+        .on_event(Event::Deposit {
+            client_id: 1,
+            tx_id: 11,
+            amount: amount_mantissa(1),
+        })
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ProcessorError::BalanceOverflow {
+            client_id: 1,
+            tx_id: 11,
+            balance: crate::BalanceField::Total,
+        }
+    );
+    assert_balances(
+        processor.account(1).unwrap(),
+        Balance::from_mantissa(i64::MAX),
+        balance(0),
+        Balance::from_mantissa(i64::MAX),
+        false,
+    );
+    assert!(!processor.deposits.contains_key(&11));
+}
+
+#[test]
+fn locked_account_rejects_deposits_and_settlement_without_mutation() {
+    let mut processor = PaymentProcessor::default();
+    for (tx_id, units) in [(10, 5), (11, 3)] {
         processor
             .on_event(Event::Deposit {
                 client_id: 1,
                 tx_id,
-                amount: money(amount),
+                amount: amount(units),
             })
             .expect("deposit should succeed");
         processor
@@ -345,23 +256,43 @@ fn chargeback_can_settle_an_existing_dispute_after_account_locks() {
         .expect("first chargeback should succeed");
     assert_balances(
         processor.account(1).unwrap(),
-        money(0),
-        money(3),
-        money(3),
+        balance(0),
+        balance(3),
+        balance(3),
         true,
     );
 
-    processor
-        .on_event(Event::Chargeback {
+    // A deposit using an existing transaction ID once changed a locked account.
+    // The remaining disputed deposit must also stay unsettled after the lock.
+    for event in [
+        Event::Deposit {
+            client_id: 1,
+            tx_id: 10,
+            amount: amount(1),
+        },
+        Event::Chargeback {
             client_id: 1,
             referred_tx_id: 11,
-        })
-        .expect("outstanding dispute should still be settled after lock");
-    assert_balances(
-        processor.account(1).unwrap(),
-        money(0),
-        money(0),
-        money(0),
-        true,
-    );
+        },
+    ] {
+        assert_eq!(
+            processor.on_event(event).unwrap_err(),
+            ProcessorError::AccountLocked { client_id: 1 }
+        );
+        assert_balances(
+            processor.account(1).unwrap(),
+            balance(0),
+            balance(3),
+            balance(3),
+            true,
+        );
+        assert!(matches!(
+            processor.deposits.get(&10).map(|info| &info.status),
+            Some(DepositStatus::Chargedback)
+        ));
+        assert!(matches!(
+            processor.deposits.get(&11).map(|info| &info.status),
+            Some(DepositStatus::Disputed)
+        ));
+    }
 }

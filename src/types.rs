@@ -96,3 +96,32 @@ impl fmt::Display for Balance {
         fmt::Display::fmt(&self.0, formatter)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fractional_balance_arithmetic_keeps_four_decimal_places() {
+        let balance = Balance::default()
+            .checked_add_amount("1.0001".parse().unwrap())
+            .unwrap()
+            .checked_sub_amount("0.0001".parse().unwrap())
+            .unwrap();
+
+        assert_eq!(balance, Balance::from_mantissa(10_000));
+    }
+
+    #[test]
+    fn minimum_and_large_transaction_amounts_are_accepted() {
+        for mantissa in [1, 100_000_000_001] {
+            let amount = TransactionAmount::try_from_mantissa(mantissa).unwrap();
+            let balance = Balance::default().checked_add_amount(amount).unwrap();
+            assert_eq!(balance.checked_sub_amount(amount), Some(Balance::default()));
+        }
+        assert_eq!(
+            TransactionAmount::try_from_mantissa(0),
+            Err(TransactionAmountError::BelowMinimum)
+        );
+    }
+}

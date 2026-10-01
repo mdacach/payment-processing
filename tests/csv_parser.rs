@@ -108,3 +108,18 @@ fn dispute_requires_empty_amount() {
     assert!(stderr.contains("record 3"), "{stderr}");
     assert!(stderr.contains("unexpected amount for dispute"), "{stderr}");
 }
+
+#[test]
+fn deposits_and_withdrawals_require_amounts() {
+    for kind in ["deposit", "withdrawal"] {
+        let output = run_csv(&format!("type,client,tx,amount\n{kind},1,1,\n"));
+        assert!(!output.status.success(), "{kind}");
+        assert!(output.stdout.is_empty(), "{kind}");
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("record 2"), "{stderr}");
+        assert!(
+            stderr.contains(&format!("missing amount for {kind}")),
+            "{stderr}"
+        );
+    }
+}
