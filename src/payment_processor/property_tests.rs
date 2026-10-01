@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use super::*;
 use hegel::{TestCase, generators as gs};
 
-// TODO: think about an oracle to test against.
-// TODO: come up with more invariants.
+// TODO: this single-threaded processor could be used as an oracle against a future
+//       implementation with multi-threading.
+// TODO: consider more invariants.
 struct PaymentModel {
     /// The system under test. The PaymentProcessor processes events generated
     /// by the property-based test, and its state is checked against the invariants.
@@ -119,9 +120,6 @@ impl PaymentModel {
     /// Generates a dispute event that refers to a valid deposit that can be disputed.
     #[rule(weight = 3)]
     fn dispute_eligible_deposit(&mut self, tc: TestCase) {
-        // A dispute for a non-disputable transaction is still interesting input,
-        // but for now let's simply avoid those.
-
         // Destructuring it immediately makes Hegel not annotate the draw by its name.
         let disputed_deposit = tc.draw(self.disputable_deposits.values_consumed());
         let (client_id, tx_id) = disputed_deposit;
@@ -281,29 +279,12 @@ impl PaymentModel {
         ));
     }
 
-    // TODO: need to review the decision below and document it in the README.
-
-    // "total is non negative" is not necessarily true, as it depends on how we
-    // deal with disputes with insufficient funds. Suppose the following
-    // scenario:
-    //
-    // 1. deposit 500
-    // 2. withdrawal 500
-    // 3. dispute-deposit
-    //
-    // Allowing the dispute means allowing a negative available balance. If that
-    // dispute is then charged back, the account total becomes negative.
-    //
-    // I see two ways of dealing with this:
-    // A. do not allow disputes if there aren't enough available funds.
-    // B. do not allow chargebacks if there aren't enough available funds.
-    //
-    // And I don't know which one to pick yet. Will need to think more about it. But anyway,
-    // this invariant is commented out for the time being.
+    // This invariant does not hold in the current system, because we allow for
+    // a deposit to be charged back even with insufficient funds.
     // #[invariant(always_run)]
     // fn total_is_non_negative(&self, _: TestCase) {
     //     for account in self.processor.accounts.values() {
-    //         assert!(account.total() >= 0); // TODO: might change if we allow negative totals.
+    //         assert!(account.total() >= 0);
     //     }
     // }
 
@@ -412,10 +393,9 @@ impl PaymentModel {
     /// Helper function to draw a valid client identifier.
     #[hegel::test_helper]
     fn draw_client_id(&mut self, tc: &TestCase) -> ClientId {
-        // TODO: consider allowing a larger number of clients.
         tc.draw_named(
             "client_id",
-            gs::integers::<ClientId>().min_value(0).max_value(10),
+            gs::integers::<ClientId>().min_value(0).max_value(1000),
         )
     }
 }
@@ -423,7 +403,7 @@ impl PaymentModel {
 /// The main property-based test.
 ///
 /// The `TooSlow` health check is suppressed because tests with many steps will naturally be slow.
-#[hegel::test(report_multiple_failures = true, test_cases = 5000, suppress_health_check = [hegel::HealthCheck::TooSlow])]
+#[hegel::test(report_multiple_failures = true, test_cases = 500, suppress_health_check = [hegel::HealthCheck::TooSlow])]
 fn state_machine_run(tc: TestCase) {
     let processor = PaymentProcessor::default();
     let model = PaymentModel {
@@ -433,5 +413,5 @@ fn state_machine_run(tc: TestCase) {
         used_tx_ids: Default::default(),
         previous_state: Default::default(),
     };
-    hegel::stateful::machine(model).steps(1000).run(tc)
+    hegel::stateful::machine(model).steps(10000).run(tc)
 }
