@@ -111,7 +111,7 @@ many assumptions and simplifications are made. Among them:
 - Each client has a single account, and that account is identifiable through the client's id.
   - CSV rows with the same `client` field refers to further transactions to that same account.
 - Deposit and withdrawal amounts must be at least 0.0001 currency units.
-  - But are otherwise ilimited.
+  - But are otherwise limited only by the underlying numeric representation.
 - Deposit and withdrawal amounts must have at most four decimal places of precision.
   - Amounts with higher degrees of precision are truncated during CSV processing. [^1]
 - An account's balance may become negative after a dispute or chargeback. 
@@ -337,11 +337,9 @@ generates sequences of events by the system and processes them. Invariants
 Property-based testing is great, [but I knew that already](https://github.com/mdacach/kv-store). I did not know that Hegel was so cool, though.
 It's still in beta, so possibly not the best pick for important projects, but I found it elegant and plan to use it more myself.
 
-It's extremely cool that Hegel supports Swarm Testing by default! 
-
-See this excellent presentation [Wil Willson on Swarm
-Testing](https://www.youtube.com/watch?v=wzfC7Q-xNik) for more details on Swarm
-Testing, it's also super cool.
+As a side note, it's extremely cool that Hegel supports Swarm Testing by default! 
+See this excellent presentation [Will Wilson on Swarm
+Testing](https://www.youtube.com/watch?v=wzfC7Q-xNik) about the topic.
 
 
 ## Possible Future Improvements:
