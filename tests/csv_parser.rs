@@ -1,19 +1,30 @@
 use std::{io::Write, process::Command};
 
 fn run_csv(input: &str) -> std::process::Output {
+    run_csv_with_log_level(input, None)
+}
+
+fn run_csv_with_log_level(input: &str, log_level: Option<&str>) -> std::process::Output {
     let mut file = tempfile::NamedTempFile::new().expect("create temporary CSV file");
     file.write_all(input.as_bytes()).expect("write CSV input");
 
-    Command::new(env!("CARGO_BIN_EXE_payment-processing"))
-        .arg(file.path())
-        .output()
-        .expect("run payment processor")
+    let mut command = Command::new(env!("CARGO_BIN_EXE_payment-processing"));
+    command.arg(file.path());
+    match log_level {
+        Some(level) => {
+            command.env("RUST_LOG", level);
+        }
+        None => {
+            command.env_remove("RUST_LOG");
+        }
+    }
+    command.output().expect("run payment processor")
 }
 
 #[test]
 fn sample_balances_and_rejected_withdrawal() {
     let input = include_str!("../samples/transactions.csv");
-    let output = run_csv(input);
+    let output = run_csv_with_log_level(input, Some("info"));
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
@@ -27,6 +38,13 @@ fn sample_balances_and_rejected_withdrawal() {
     assert!(stderr.contains("record_number=6"), "{stderr}");
     assert!(stderr.contains("rows=5"), "{stderr}");
     assert!(stderr.contains("processing complete"), "{stderr}");
+}
+
+#[test]
+fn logs_are_disabled_by_default() {
+    let output = run_csv(include_str!("../samples/transactions.csv"));
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
@@ -83,11 +101,12 @@ fn malformed_input_fails_before_output() {
 
 #[test]
 fn rejected_transaction_does_not_stop_later_rows() {
-    let output = run_csv(
+    let output = run_csv_with_log_level(
         "type,client,tx,amount\n\
          deposit,1,1,2\n\
          withdrawal,1,2,3\n\
          deposit,1,3,1\n",
+        Some("info"),
     );
     assert!(output.status.success());
     assert_eq!(

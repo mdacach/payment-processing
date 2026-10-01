@@ -200,11 +200,10 @@ command below).
 cargo run -- samples/transactions.csv > accounts.csv
 ```
 
-Transactions rejected by the processor are logged as warnings to stderr, but are
-otherwise skipped. Processing continues until the end of the file.
-
-Extra information is also logged to stderr, like row count and rejected transactions.
-Setting the environment variable `RUST_LOG=off` suppresses these logs.
+Transactions rejected by the processor are skipped. Processing continues until
+the end of the file. Logs are disabled by default. `RUST_LOG=warn` can be set to
+see rejected transactions on stderr, or `RUST_LOG=info` to also see processing
+summaries.
 
 Malformed CSVs or invalid fields immediately stop the run with an error. 
 
