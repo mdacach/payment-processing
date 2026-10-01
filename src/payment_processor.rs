@@ -39,10 +39,6 @@ impl PaymentProcessor {
     ///
     /// A locked account rejects every further operation, including disputes,
     /// resolves, and chargebacks.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the account is locked or the event cannot be applied.
     pub fn on_event(&mut self, event: Event) -> Result<(), ProcessorError> {
         let client_id = *event.client_id();
         let tx_id = event.transaction_id();
@@ -81,7 +77,7 @@ impl PaymentProcessor {
     }
 
     /// Credits `amount` to the client's available and total funds and records
-    /// the deposit under `tx_id` so it can be disputed later.
+    /// the deposit under `tx_id` in case it is disputed later.
     fn handle_deposit(
         account: &mut ActiveAccountGuard<'_>,
         deposits: &mut BTreeMap<TxId, DepositInfo>,
@@ -105,9 +101,7 @@ impl PaymentProcessor {
 
     /// Debits `amount` from the client's available and total funds.
     ///
-    /// Rejects the withdrawal without changing either balance if available
-    /// funds are insufficient. The withdrawal's transaction ID is used for
-    /// error context; only deposits can be disputed.
+    /// Rejects the withdrawal if available funds are insufficient.
     fn handle_withdrawal(
         account: &mut ActiveAccountGuard<'_>,
         client_id: ClientId,
@@ -123,10 +117,11 @@ impl PaymentProcessor {
 
     /// Holds the amount of the deposit identified by `referred_tx_id`.
     ///
-    /// Moves that amount from available to held funds without changing total
-    /// funds. Rejects a missing deposit, a deposit owned by another client, or
-    /// one that has already been disputed. Available funds may become negative
-    /// if the client has already spent the deposit.
+    /// Rejects a missing deposit, or a deposit that has already been disputed.
+    /// one that has already been disputed.
+    ///
+    /// Note that available funds may become negative if the client has already
+    /// spent the deposit.
     fn handle_dispute(
         account: &mut ActiveAccountGuard<'_>,
         deposits: &mut BTreeMap<TxId, DepositInfo>,
@@ -153,9 +148,7 @@ impl PaymentProcessor {
 
     /// Resolves the dispute for the deposit identified by `referred_tx_id`.
     ///
-    /// Returns the deposit's amount from held to available funds without
-    /// changing total funds. Rejects a missing deposit, a deposit owned by
-    /// another client, or one that is not currently disputed.
+    /// Rejects a missing deposit, or a deposit that is not currently disputed.
     fn handle_resolve(
         account: &mut ActiveAccountGuard<'_>,
         deposits: &mut BTreeMap<TxId, DepositInfo>,
