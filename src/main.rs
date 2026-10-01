@@ -25,29 +25,26 @@ struct BalanceRow {
 }
 
 fn main() -> Result<()> {
-    // Keep account CSV on stdout and filter stderr logs with RUST_LOG.
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .with_env_filter(filter)
+        // Write to stderr in order to not pollute output.
         .with_writer(io::stderr)
         .with_target(false)
         .with_ansi(false)
-        .without_time()
         .init();
 
     let mut args = env::args_os();
     let program = args.next().unwrap_or_default();
-    let input_path = args.next().with_context(|| {
-        format!(
-            "usage: {} <transactions.csv>",
-            Path::new(&program).display()
-        )
-    })?;
+    let usage = format!(
+        "usage: {} <transactions.csv>",
+        Path::new(&program).display()
+    );
+    let input_path = args
+        .next()
+        .with_context(|| format!("please provide a CSV input file; {usage}"))?;
     if args.next().is_some() {
-        bail!(
-            "usage: {} <transactions.csv>",
-            Path::new(&program).display()
-        );
+        bail!("expected exactly one CSV input file; {usage}");
     }
 
     run(Path::new(&input_path))
@@ -67,34 +64,30 @@ fn run(path: &Path) -> Result<()> {
         );
     }
 
-    // The events are materialized all at once. Streaming could be an improvement,
-    // but is out of scope for now.
-    let events: Vec<(usize, Event)> = reader
-        .deserialize::<CsvRow>()
-        .enumerate()
-        .map(|(index, row)| {
-            let record_number = index + 2;
-            let row = row.with_context(|| format!("{}: record {record_number}", path.display()))?;
-            let event = Event::try_from(row)
-                .with_context(|| format!("{}: record {record_number}", path.display()))?;
-            Ok((record_number, event))
-        })
-        .collect::<Result<_>>()?;
-
-    info!(path = %path.display(), rows = events.len(), "parsed transactions");
-
     let mut processor = PaymentProcessor::default();
+    let mut rows = 0;
     let mut rejected = 0;
-    for (record_number, event) in events {
-        // Errors while processing the transactions are reported through warning
-        // logs, but processing other transactions continues normally.
+    // Each row is processed once at a time, in order to avoid materializing a
+    // large data set in-memory all at once.
+    for (index, row) in reader.deserialize::<CsvRow>().enumerate() {
+        let record_number = index + 2;
+        let row = row.with_context(|| format!("{}: record {record_number}", path.display()))?;
+        let event = Event::try_from(row)
+            .with_context(|| format!("{}: record {record_number}", path.display()))?;
+        rows += 1;
+
+        // Errors are reported to stderr, but other transactions continue
+        // processing normally.
         if let Err(error) = processor.on_event(event) {
             rejected += 1;
             warn!(record_number, ?event, %error, "transaction rejected");
         }
     }
+    info!(path = %path.display(), rows, "processed transactions");
 
-    // Output is written as CSV according to the README's format.
+    // But for the output, we can't do the same streaming. A client's balance
+    // calculation requires processing all of its transactions, and we can't
+    // know when they have ended.
     let mut writer = csv::WriterBuilder::new()
         .has_headers(false)
         .from_writer(io::stdout().lock());
@@ -133,16 +126,29 @@ impl TryFrom<CsvRow> for Event {
         } = row;
 
         match kind.as_str() {
-            "deposit" => Ok(Event::Deposit {
-                client_id,
-                tx_id,
-                amount: parse_movement_amount(&kind, &amount)?,
-            }),
-            "withdrawal" => Ok(Event::Withdrawal {
-                client_id,
-                tx_id,
-                amount: parse_movement_amount(&kind, &amount)?,
-            }),
+            "deposit" | "withdrawal" => {
+                if amount.is_empty() {
+                    bail!("missing amount for {kind}");
+                }
+                let truncated = maybe_truncate(&amount)?;
+                let amount: TransactionAmount = truncated
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("{e}:{truncated}"))?;
+
+                if kind == "deposit" {
+                    Ok(Event::Deposit {
+                        client_id,
+                        tx_id,
+                        amount,
+                    })
+                } else {
+                    Ok(Event::Withdrawal {
+                        client_id,
+                        tx_id,
+                        amount,
+                    })
+                }
+            }
             "dispute" | "resolve" | "chargeback" if !amount.is_empty() => {
                 bail!("unexpected amount for {kind}: {amount}")
             }
@@ -163,19 +169,7 @@ impl TryFrom<CsvRow> for Event {
     }
 }
 
-fn parse_movement_amount(kind: &str, raw: &str) -> Result<TransactionAmount> {
-    if raw.is_empty() {
-        bail!("missing amount for {kind}");
-    }
-
-    let truncated = maybe_truncate(raw)?;
-    truncated
-        .parse()
-        .map_err(|error| anyhow::anyhow!("{error}: {raw}"))
-}
-
-// Discard fractional digits after the fourth without rounding. Validate every
-// digit first so malformed text after the fourth place is not silently ignored.
+// Truncate extra places of precision after the fourth decimal.
 fn maybe_truncate(raw: &str) -> Result<String> {
     if let Some((whole, fraction)) = raw.split_once('.') {
         if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
