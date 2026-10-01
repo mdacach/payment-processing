@@ -100,33 +100,25 @@ defrauded user.
 Internally, allowing a chargeback even with insufficient funds means that the
 available balance in an account can be negative, meaning the system is "owed".
 
+## Running the system
 
+The binary takes exactly one input file path, a CSV file as described in
+[Input](#input). The binary writes its output to stdout, as described in
+[Output](#output). This can then be piped into a file (`accounts.csv` in the
+command below).
 
-## Implementation notes
+```sh
+cargo run -- samples/transactions.csv > accounts.csv
+```
 
-Payment processing systems are highly complex. For the purposes of this project,
-many assumptions and simplifications are made. Among them:
+Transactions rejected by the processor are skipped. Processing continues until
+the end of the file. Logs are disabled by default. `RUST_LOG=warn` can be set to
+see rejected transactions on stderr, or `RUST_LOG=info` to also see processing
+summaries.
 
-- All transaction identifiers are required to be globally unique.
-- Each client has a single account, and that account is identifiable through the client's id.
-  - CSV rows with the same `client` field refers to further transactions to that same account.
-- Deposit and withdrawal amounts must be at least 0.0001 currency units.
-  - But are otherwise limited only by the underlying numeric representation.
-- Deposit and withdrawal amounts must have at most four decimal places of precision.
-  - Amounts with higher degrees of precision are truncated during CSV processing. [^1]
-- An account's balance may become negative after a dispute or chargeback. 
-- Only deposit transactions can be disputed.
-  - Preference is given to consistent dispute semantics. Under those semantics,
-    a disputed withdrawal could end up withdrawing funds twice, which doesn't
-    make sense. Thus, disputed withdrawals are rejected by the system.
-- Each deposit transaction can only be disputed once.
-- A disputed deposit can only be settled (resolved or charged back) once.
-- A frozen account (after a chargeback) can never be unfrozen.
-- No further operations are permitted for a frozen account, including disputes, resolutions and chargebacks.
-  - Allowing previously disputed deposits to be settled could also be sensible,
-    but it's not allowed in this version.
+Malformed CSVs or invalid fields immediately stop the run with an error. 
 
-## Input
+### Input
 
 The input file must be in CSV format with header `type,client,tx,amount` (as
 exemplified in [Events](#events)). Extra whitespace is fine. Rows are processed in
@@ -146,14 +138,14 @@ deposit, 1, 3, 2.0
 withdrawal, 1, 4, 1.5
 withdrawal, 2, 5, 3.0
 ```
-> _file available in: ([`samples/transactions.csv`](samples/transactions.csv))._
+> _file available in ([`samples/transactions.csv`](samples/transactions.csv))._
 
 For this particular scenario, the final withdrawal is rejected due to
 insufficient funds (client 2 only has `2.0000` available at that moment).
 
 Malformed CSV files are rejected.
 
-## Output
+### Output
 
 The output of the binary is a CSV with one row per client account. The output
 for the example above is:
@@ -180,7 +172,7 @@ Balances are always written with four decimal places.
 Note that the ordering of the rows is not guaranteed (but in the current version
 will be always ordered by increasing client identifiers).
 
-### Samples
+## Samples
 The samples/ folder contains generated input files based on the property-based test's
 generator. The readable/ subfolder contains smaller and easier-to-read samples.
 
@@ -189,23 +181,29 @@ the property-based tests in
 [`src/payment_processor/property_tests.rs`](src/payment_processor/property_tests.rs),
 which generate thousands of complex events at a time.
 
-## Running the system
+## Implementation notes
 
-The binary takes exactly one input file path, a CSV file as described in
-[Input](#input). The binary writes its output to stdout, as described in
-[Output](#output). This can then be piped into a file (`accounts.csv` in the
-command below).
+Payment processing systems are highly complex. For the purposes of this project,
+many assumptions and simplifications are made. Among them:
 
-```sh
-cargo run -- samples/transactions.csv > accounts.csv
-```
-
-Transactions rejected by the processor are skipped. Processing continues until
-the end of the file. Logs are disabled by default. `RUST_LOG=warn` can be set to
-see rejected transactions on stderr, or `RUST_LOG=info` to also see processing
-summaries.
-
-Malformed CSVs or invalid fields immediately stop the run with an error. 
+- All transaction identifiers are required to be globally unique.
+- Each client has a single account, and that account is identifiable through the client's id.
+  - CSV rows with the same `client` field refers to further transactions to that same account.
+- Deposit and withdrawal amounts must be at least 0.0001 currency units.
+  - But are otherwise limited only by the underlying numeric representation.
+- Deposit and withdrawal amounts must have at most four decimal places of precision.
+  - Amounts with higher degrees of precision are truncated during CSV processing. [^1]
+- An account's balance may become negative after a dispute or chargeback. 
+- Only deposit transactions can be disputed.
+  - Preference is given to consistent dispute semantics. Under those semantics,
+    a disputed withdrawal could end up withdrawing funds twice, which doesn't
+    make sense. Thus, disputed withdrawals are rejected by the system.
+- Each deposit transaction can only be disputed once.
+- A disputed deposit can only be settled (resolved or charged back) once.
+- A frozen account (after a chargeback) can never be unfrozen.
+- No further operations are permitted for a frozen account, including disputes, resolutions and chargebacks.
+  - Allowing previously disputed deposits to be settled could also be sensible,
+    but it's not allowed in this version.
 
 # Extra Stuff
 
@@ -220,23 +218,24 @@ obvious considerations that went into this implementation.
 #### Preventing invalid states
 Rust is very good at preventing invalid states. See [Make Illegal States
 Unrepresentable](https://corrode.dev/blog/illegal-state/) for instance.
-The heavy use of new-types that are valid by construction is an example of this
+The heavy use of new-types that are valid by construction are examples of this
 idea. See also: [Parse, don't
-validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)
+validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/).
 
-#### Careful when using external dependencies
+
+#### Using external dependencies
 
 In the realm of deterministic testing, external dependencies might introduce
 nondeterminism that can be hard to spot or workaround (see the [disadvantages of
 deterministic simulation testing](https://www.polarsignals.com/blog/posts/2025/07/08/dst-rust#disadvantages)).
-For critical projects, external dependencies need to audited and chosen with care.
-An owned implementation might be preferable, for more control.
+For critical projects, external dependencies need to audited and chosen with
+care. An owned implementation might be preferable, in some cases.
 
-After exploring AI-generated own type implementation (which was too ugly: AI:
-link to branch with experiment), I opted to use an external dependency to
+After exploring an AI-generated [owned money type implementation](https://github.com/mdacach/payment-processing/tree/draft-money-type)
+(which was too ugly), I opted to use an external dependency to
 represent the currency amounts. I then chose `primitive_fixed_point_decimal`
-based on [Comparison and Benchmarking of Rust Decimal
-Crates][https://wubingzheng.github.io/en/Decimal-Crates-Comparison.html]. 
+based on the author's [Comparison and Benchmarking of Rust Decimal
+Crates](https://wubingzheng.github.io/en/Decimal-Crates-Comparison.html). 
 
 (But in a production project, more effort should have been devoted for both
 attempting an owned implementation as well as choosing the crate to use).
